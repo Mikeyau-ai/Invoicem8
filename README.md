@@ -75,7 +75,8 @@ Permanent download link:
 | Routing   | `core/router.py`, `core/watcher.py` |
 | Providers | `integrations/accounting/*` + `registry.py` |
 | Startup   | `core/startup.py` (HKCU Run key) |
-| Updates   | `core/updater.py`, `gui/update_dialog.py`, `release.py` |
+| Updates   | `core/updater.py`, `gui/update_dialog.py`, `release.py`, `version.py` |
+| About     | `gui/about_dialog.py` + bundled `CHANGELOG.md` |
 | GUI       | `gui/*` (CustomTkinter, RamBo theme in `gui/theme.py`) |
 
 ## Caveats

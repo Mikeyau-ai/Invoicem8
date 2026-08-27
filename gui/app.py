@@ -20,6 +20,7 @@ from gui.dialogs import NewCustomerDialog
 from gui.errors_tab import ErrorsTab
 from gui.logs_tab import LogsTab
 from gui.settings_tab import SettingsTab
+from gui.about_dialog import AboutWindow
 from gui.theme import C, FONT_TAGLINE, FONT_UI, FONT_WORDMARK, accent_button
 from gui.update_dialog import UpdateDialog
 from integrations.registry import label_for
@@ -51,6 +52,7 @@ class App(ctk.CTk):
         self._pump_job: str | None = None
         self._glow_phase = 0
         self._settings_win: ctk.CTkToplevel | None = None
+        self._about_win: ctk.CTkToplevel | None = None
 
         self._build_header()
         self._build_tabs()
@@ -78,10 +80,14 @@ class App(ctk.CTk):
         bar = ctk.CTkFrame(self, fg_color=C["panel"], corner_radius=0, height=54)
         bar.pack(fill="x")
         bar.pack_propagate(False)
-        ctk.CTkLabel(bar, text="INVOICEM8", font=FONT_WORDMARK,
-                     text_color=C["text"]).pack(side="left", padx=(16, 4))
-        self._tagline = ctk.CTkLabel(bar, text="", font=FONT_TAGLINE, text_color=C["dim"])
+        wordmark = ctk.CTkLabel(bar, text="INVOICEM8", font=FONT_WORDMARK,
+                                text_color=C["text"], cursor="hand2")
+        wordmark.pack(side="left", padx=(16, 4))
+        wordmark.bind("<Button-1>", lambda _e: self.open_about())
+        self._tagline = ctk.CTkLabel(bar, text="", font=FONT_TAGLINE,
+                                     text_color=C["dim"], cursor="hand2")
         self._tagline.pack(side="left", padx=4)
+        self._tagline.bind("<Button-1>", lambda _e: self.open_about())
         self._refresh_tagline()
 
         # Right-aligned controls (packed right-to-left): Scan now | Start/Stop | Settings
@@ -125,6 +131,13 @@ class App(ctk.CTk):
         self._settings_win = win
         self.settings_tab = SettingsTab(win, self)
         win.after(200, win.lift)
+
+    def open_about(self) -> None:
+        """About / changelog window (single instance)."""
+        if self._about_win is not None and self._about_win.winfo_exists():
+            self._about_win.lift()
+            return
+        self._about_win = AboutWindow(self)
 
     # -- event pump (runs on the Tk main thread) ----------------
     def emit_event(self, **event) -> None:

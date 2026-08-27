@@ -37,6 +37,10 @@ def _bundle(pkg: str, optional: bool = False) -> None:
 # Required.
 _bundle("customtkinter")
 
+# Ship the changelog so the in-app About window can show it offline.
+if os.path.exists("CHANGELOG.md"):
+    datas.append(("CHANGELOG.md", "."))
+
 # Outlook COM (pywin32) - lazily imported, so name the submodules.
 hiddenimports += [
     "win32com", "win32com.client", "win32com.server",

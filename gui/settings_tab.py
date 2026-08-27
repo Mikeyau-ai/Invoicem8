@@ -115,6 +115,8 @@ class SettingsTab:
                       lambda: self._app.check_updates_now(
                           lambda t: self._status.configure(text=t, text_color=C["dim"])),
                       colour=C["blue"]).pack(side="left")
+        accent_button(ctk, row, "About / Changelog", self._app.open_about,
+                      colour=C["btn_off"]).pack(side="left", padx=8)
 
     def _build_actions(self) -> None:
         bar = ctk.CTkFrame(self.frame, fg_color=C["bg"])
