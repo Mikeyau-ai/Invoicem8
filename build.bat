@@ -1,6 +1,14 @@
 @echo off
 setlocal
+title InvoiceM8 - build
 
+echo.
+echo   ##### #   # #   #  ###  ##### #### ##### #   #  ###
+echo     #   ##  # #   # #   #   #   #    #    ## ## #   #
+echo     #   # # # #   # #   #   #   #    ###  # # #  ###
+echo     #   #  ## #   # #   #   #   #    #    #   # #   #
+echo   ##### #   #   #    ###  ##### #### ##### #   #  ###
+echo   build script   github.com/Mikeyau-ai/Invoicem8
 echo.
 echo  Building InvoiceM8...
 echo.

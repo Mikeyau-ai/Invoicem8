@@ -1,7 +1,15 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+title InvoiceM8 - release
 
+echo.
+echo   ##### #   # #   #  ###  ##### #### ##### #   #  ###
+echo     #   ##  # #   # #   #   #   #    #    ## ## #   #
+echo     #   # # # #   # #   #   #   #    ###  # # #  ###
+echo     #   #  ## #   # #   #   #   #    #    #   # #   #
+echo   ##### #   #   #    ###  ##### #### ##### #   #  ###
+echo   release script   github.com/Mikeyau-ai/Invoicem8
 echo.
 echo  Building + publishing InvoiceM8 release...
 echo.

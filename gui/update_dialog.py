@@ -88,11 +88,14 @@ class UpdateDialog(ctk.CTkToplevel):
                                    text_color=C["red"])
             self._update_btn.configure(state="normal", text="Update now")
             return
-        self._status.configure(text="Installing and restarting...", text_color=C["green"])
-        if updater.apply(path):
-            # Hand off to the detached swap script; we must exit now.
+        self._status.configure(
+            text="Handing off to the InvoiceM8 updater window...",
+            text_color=C["green"])
+        if updater.apply(path, self._info.version):
+            # The updater console now waits for us to exit, swaps the exe and
+            # relaunches - we must close now.
             self.after(400, self._master._on_close)
         else:
-            self._status.configure(text="Could not launch the installer.",
+            self._status.configure(text="Could not start the updater.",
                                    text_color=C["red"])
             self._update_btn.configure(state="normal", text="Update now")

@@ -243,57 +243,113 @@ def download(info: UpdateInfo, progress_cb=None, cancel=None) -> Path | None:
     return dest
 
 
-# A running exe can't overwrite itself: a detached cmd waits for us to exit,
-# copies the new file over, and relaunches. Tools called by absolute path so a
-# Unix `find` on PATH can't shadow the wait loop.
-_APPLY_SCRIPT = """@echo off
+# A running exe can't overwrite itself, so a detached cmd waits for us to exit,
+# copies the new file over, and relaunches. It runs in its OWN VISIBLE console
+# window (CREATE_NEW_CONSOLE) with a clear InvoiceM8 banner and step-by-step
+# status, so it can't be mistaken for a stray/malware process - and it holds
+# the window open on a visible countdown before closing so the user can read it.
+# System tools are called by absolute path so a Unix `find`/`ping` on PATH
+# can't shadow the wait loop.
+_APPLY_SCRIPT = r"""@echo off
 setlocal
-set "TASKLIST=%SystemRoot%\\System32\\tasklist.exe"
-set "FIND=%SystemRoot%\\System32\\find.exe"
-set "PING=%SystemRoot%\\System32\\ping.exe"
+title InvoiceM8 Updater  (v{ver})
+mode con: cols=80 lines=32 >nul 2>&1
+color 0A
 
+set "TASKLIST=%SystemRoot%\System32\tasklist.exe"
+set "FIND=%SystemRoot%\System32\find.exe"
+set "PING=%SystemRoot%\System32\ping.exe"
+set "TIMEOUT=%SystemRoot%\System32\timeout.exe"
+
+cls
+echo.
+echo    ##### #   # #   #  ###  ##### #### ##### #   #  ###
+echo      #   ##  # #   # #   #   #   #    #    ## ## #   #
+echo      #   # # # #   # #   #   #   #    ###  # # #  ###
+echo      #   #  ## #   # #   #   #   #    #    #   # #   #
+echo    ##### #   #   #    ###  ##### #### ##### #   #  ###
+echo.
+echo   ============================================================
+echo    InvoiceM8 auto-updater    github.com/Mikeyau-ai/Invoicem8
+echo   ============================================================
+echo.
+echo    This window is part of InvoiceM8's built-in updater - it is
+echo    not a background/malware process. It is installing update
+echo    v{ver} in three steps:
+echo.
+echo      1. wait for InvoiceM8 to close
+echo      2. copy the new InvoiceM8.exe into place
+echo      3. restart InvoiceM8
+echo.
+echo    It closes itself automatically when finished.
+echo   ------------------------------------------------------------
+echo.
+
+echo    [....] Waiting for InvoiceM8 (PID {pid}) to close...
 set /a tries=0
 :wait
 "%TASKLIST%" /fi "PID eq {pid}" /nh 2>nul | "%FIND%" "{pid}" >nul
 if errorlevel 1 goto ready
 set /a tries+=1
-if %tries% GEQ 60 (
-  echo InvoiceM8 did not exit; update cancelled.
-  pause
-  exit /b 1
-)
-"%PING%" -n 2 127.0.0.1 >nul
+if %tries% GEQ 60 goto timedout
+"%PING%" -n 3 127.0.0.1 >nul
 goto wait
 
+:timedout
+echo    [FAIL] InvoiceM8 did not close within 2 minutes - update cancelled.
+echo           Your existing version has NOT been changed. Close
+echo           InvoiceM8 fully and check for updates again.
+echo.
+echo    This window stays open so you can read the message above.
+"%TIMEOUT%" /t 30 || "%PING%" -n 31 127.0.0.1 >nul
+exit /b 1
+
 :ready
-rem Onefile bootloader parent can hold the exe briefly after the child exits.
+echo    [ OK ] InvoiceM8 has closed.
 "%PING%" -n 3 127.0.0.1 >nul
+echo    [....] Installing v{ver}...
 copy /y "{src}" "{dst}" >nul
-if errorlevel 1 (
-  echo InvoiceM8 update failed to copy the new file.
-  pause
-  exit /b 1
-)
-start "" "{dst}"
+if errorlevel 1 goto copyfail
+echo    [ OK ] New version copied into place.
 del /q "{src}" >nul 2>&1
+echo    [....] Restarting InvoiceM8...
+start "" "{dst}"
+echo    [ OK ] Done - InvoiceM8 v{ver} is starting.
+echo.
+echo   ============================================================
+echo    Update complete. This window will close in 12 seconds.
+echo   ============================================================
+"%TIMEOUT%" /t 12 || "%PING%" -n 13 127.0.0.1 >nul
+exit /b 0
+
+:copyfail
+echo    [FAIL] Could not replace:
+echo             {dst}
+echo           Your existing version has NOT been changed. Another
+echo           copy of InvoiceM8 may still be running, or the file
+echo           is locked. Try updating again in a minute.
+echo.
+echo    This window stays open so you can read the message above.
+"%TIMEOUT%" /t 30 || "%PING%" -n 31 127.0.0.1 >nul
+exit /b 1
 """
 
 
-def apply(exe_path: Path) -> bool:
-    """Launch the detached swap script. Caller must exit immediately after."""
+def apply(exe_path: Path, version: str = "") -> bool:
+    """Launch the visible swap-script console. Caller must exit immediately."""
     dst = running_exe()
     script = _UPDATE_DIR / "apply_update.cmd"
     try:
         script.write_text(
-            _APPLY_SCRIPT.format(pid=os.getpid(), src=str(exe_path), dst=str(dst)),
+            _APPLY_SCRIPT.format(pid=os.getpid(), src=str(exe_path),
+                                 dst=str(dst), ver=version or current_version()),
             encoding="utf-8",
         )
         subprocess.Popen(
             ["cmd", "/c", str(script)],
             close_fds=True,
-            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
         )
         return True
     except OSError:
