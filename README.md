@@ -20,6 +20,19 @@ python main.py
 
 Python 3.11+ recommended. Windows only (uses pywin32 COM + `winreg`).
 
+## Build a standalone .exe
+
+```bash
+build.bat
+```
+
+Runs PyInstaller against `InvoiceM8.spec` and produces a single windowed
+`dist\InvoiceM8.exe` (~100 MB, no Python needed on the target machine).
+Build from an environment with the full `requirements.txt` installed so the AI
+/ Graph / attachment libraries get bundled - the spec silently skips any that
+are missing. Settings and the database still live in `%LOCALAPPDATA%\InvoiceM8`,
+so the exe stays stateless and can be replaced in place to update.
+
 ## First run
 
 1. **Settings tab** – choose the accounting system, enter credentials, save.

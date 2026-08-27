@@ -6,10 +6,9 @@ __pycache__/
 venv/
 env/
 
-# Build
+# Build output (the .spec is tracked)
 build/
 dist/
-*.spec
 
 # Local runtime data / secrets (InvoiceM8 stores these in %LOCALAPPDATA%,
 # but ignore any that land here too)
