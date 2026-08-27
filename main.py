@@ -42,7 +42,13 @@ def main() -> None:
 
     theme.apply(ctk)
     app = App(db, settings, box, autostart=autostart)
-    app.mainloop()
+    try:
+        app.mainloop()
+    finally:
+        # Belt-and-braces: _on_close normally handles this, but make sure the
+        # watcher is stopped and the DB is closed even on an abnormal exit.
+        app.watcher.stop()
+        db.close()
 
 
 if __name__ == "__main__":

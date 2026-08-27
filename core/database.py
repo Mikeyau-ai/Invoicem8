@@ -107,12 +107,27 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+class _ClosedCursor:
+    """Stand-in returned by Database._exec after close() so a racing worker
+    thread on shutdown gets a harmless no-op instead of an exception."""
+
+    lastrowid = 0
+    rowcount = 0
+
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return None
+
+
 class Database:
     """Serialized access to the InvoiceM8 SQLite file."""
 
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._closed = False
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
@@ -122,14 +137,18 @@ class Database:
             self._conn.commit()
 
     # -- low level helpers -------------------------------------------------
-    def _exec(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
+    def _exec(self, sql: str, params: Iterable[Any] = ()):
         with self._lock:
+            if self._closed:                 # a leaked worker thread on shutdown
+                return _ClosedCursor()
             cur = self._conn.execute(sql, tuple(params))
             self._conn.commit()
             return cur
 
     def _query(self, sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
         with self._lock:
+            if self._closed:
+                return []
             return self._conn.execute(sql, tuple(params)).fetchall()
 
     # -- settings -------------------------------------------------------
@@ -323,5 +342,12 @@ class Database:
         return rows[0]["m"] if rows and rows[0]["m"] else None
 
     def close(self) -> None:
+        """Close the connection. Idempotent; safe while other threads race."""
         with self._lock:
-            self._conn.close()
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                self._conn.close()
+            except Exception:
+                pass

@@ -56,10 +56,17 @@ class Watcher:
         self._emit(level="INFO", action="watcher", message="Watcher started.")
 
     def stop(self) -> None:
+        """Signal the thread and wait briefly for it to exit. Idempotent.
+
+        The thread is a daemon, so if it is stuck in a network call it is left
+        to finish on its own and the process can still exit cleanly - the DB
+        guards against a late write from it.
+        """
+        already_stopping = self._stop.is_set()
         self._stop.set()
         self._wake.set()
-        if self._thread:
-            self._thread.join(timeout=10)
+        if self._thread and self._thread.is_alive() and not already_stopping:
+            self._thread.join(timeout=5)
         self._on_status(False)
         self._emit(level="INFO", action="watcher", message="Watcher stopped.")
 

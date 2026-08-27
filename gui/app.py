@@ -46,7 +46,9 @@ class App(ctk.CTk):
         theme.dark_titlebar(self)
 
         self._running = False
+        self._closing = False
         self._glow_job: str | None = None
+        self._pump_job: str | None = None
         self._glow_phase = 0
         self._settings_win: ctk.CTkToplevel | None = None
 
@@ -57,11 +59,12 @@ class App(ctk.CTk):
             db, settings,
             on_new_customer=lambda name, pid: self._new_customers.put((name, pid)),
             emit=self.emit_event,
-            on_status=lambda running: self.after(0, self._set_status, running),
+            on_status=lambda running: None if self._closing
+            else self.after(0, self._set_status, running),
         )
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.after(400, self._pump)
+        self._pump_job = self.after(400, self._pump)
 
         # Auto-update check (no-ops when running from source or when disabled).
         self._update_shown = False
@@ -126,6 +129,8 @@ class App(ctk.CTk):
     # -- event pump (runs on the Tk main thread) ----------------
     def emit_event(self, **event) -> None:
         """Thread-safe: called by watcher/router to push a log line."""
+        if self._closing:
+            return
         event.setdefault("ts", datetime.now(timezone.utc).isoformat(timespec="seconds"))
         # Persist non-error activity; errors are written by the router itself.
         if event.get("level") != "ERROR":
@@ -136,6 +141,8 @@ class App(ctk.CTk):
 
     def _pump(self) -> None:
         """Drain queues and update the UI. Rescheduled every 400 ms."""
+        if self._closing:
+            return
         try:
             while True:
                 self.logs_tab.append_live(self._events.get_nowait())
@@ -154,7 +161,7 @@ class App(ctk.CTk):
                 self._update_shown = True
                 UpdateDialog(self, info)
 
-        self.after(400, self._pump)
+        self._pump_job = self.after(400, self._pump)
 
     # -- updates ----------------------------------------------
     def check_updates_now(self, on_result) -> None:
@@ -233,6 +240,8 @@ class App(ctk.CTk):
 
     def _set_status(self, running: bool) -> None:
         """Reflect watcher state in the toggle button and the glow border."""
+        if self._closing:
+            return
         self._running = running
         self._start_btn.configure(
             text="Stop Watcher" if running else "Start Watcher",
@@ -249,6 +258,8 @@ class App(ctk.CTk):
 
     def _glow_tick(self) -> None:
         """Pulse the tab-area border green while the watcher runs."""
+        if self._closing:
+            return
         self._glow_phase = (self._glow_phase + 1) % 48
         t = (math.sin(self._glow_phase / 48 * 2 * math.pi) + 1) / 2  # 0..1
         self._glow.configure(border_color=theme.shade(C["green"], 0.55 + 0.95 * t))
@@ -269,11 +280,31 @@ class App(ctk.CTk):
         self.logs_tab.refresh()
 
     def _on_close(self) -> None:
-        if self._glow_job is not None:
-            self.after_cancel(self._glow_job)
-            self._glow_job = None
+        """Tear down in order: stop scheduled callbacks, stop the watcher
+        thread, close the DB, then destroy the window. Idempotent and
+        exception-safe so a close always completes."""
+        if self._closing:
+            return
+        self._closing = True
+
+        for job in (self._pump_job, self._glow_job):
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+        self._pump_job = self._glow_job = None
+
         try:
-            self.watcher.stop()
+            self.watcher.stop()          # signals + joins the daemon thread
+        except Exception:
+            pass
+        try:
+            self.db.close()              # after the watcher stopped touching it
+        except Exception:
+            pass
+
+        try:
+            self.quit()                  # exit mainloop
         finally:
-            self.db.close()
-            self.destroy()
+            self.destroy()               # drop the Tk widgets
