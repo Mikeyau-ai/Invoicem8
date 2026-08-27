@@ -43,6 +43,8 @@ SECRET_KEYS = {
     "outlook.graph_refresh_token",
     "ai.gemini_api_key",
     "ai.anthropic_api_key",
+    "ai.openai_api_key",
+    "ai.compat_api_key",
 }
 
 # Defaults for non-secret settings.
@@ -52,8 +54,9 @@ DEFAULTS = {
     "outlook.backend": "com",             # com | graph
     "outlook.account": "",                # mailbox / UPN to monitor
     "outlook.folder": "Inbox",
-    "ai.provider": "gemini",              # gemini | anthropic
-    "ai.model": "gemini-1.5-flash",
+    "ai.provider": "gemini",              # openai | gemini | anthropic | openai_compatible
+    "ai.model": "",                       # blank -> provider default
+    "ai.compat_base_url": "http://localhost:11434/v1",  # OpenAI-compatible endpoint
     "watcher.poll_minutes": "5",
     "watcher.unread_only": "1",
     "watcher.autostart": "0",             # start watcher when app opens

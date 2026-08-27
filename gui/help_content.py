@@ -169,15 +169,27 @@ FIELD_HELP: dict[str, str] = {
 
     # -- AI --
     "ai.model":
-        "Model name for the chosen provider. Gemini: gemini-1.5-flash or "
-        "gemini-2.0-flash. Anthropic: claude-sonnet-5. Flash/Haiku-class "
-        "models are cheapest and fine for this.",
+        "Model name for the chosen provider. Leave blank to use the default. "
+        "OpenAI: gpt-4o-mini. Gemini: gemini-1.5-flash / gemini-2.0-flash. "
+        "Anthropic: claude-sonnet-5 (or a Haiku model). For an OpenAI-"
+        "compatible host use whatever model id that host exposes.",
+    "ai.openai_api_key":
+        "platform.openai.com > sign in > Dashboard > API keys > 'Create new "
+        "secret key'. Add billing credit under Settings > Billing first.",
     "ai.gemini_api_key":
         "aistudio.google.com > 'Get API key' > Create API key. Free tier is "
         "usually enough for invoice parsing volume.",
     "ai.anthropic_api_key":
         "console.anthropic.com > Settings > API keys > Create Key. Add billing "
         "credit first.",
+    "ai.compat_api_key":
+        "API key for the OpenAI-compatible host: OpenRouter (openrouter.ai/keys), "
+        "Groq (console.groq.com/keys), Together, Azure OpenAI, etc. Leave blank "
+        "for a local server (Ollama / LM Studio) that needs no key.",
+    "ai.compat_base_url":
+        "Base URL of the OpenAI-compatible endpoint, ending in /v1. Examples: "
+        "https://openrouter.ai/api/v1 , https://api.groq.com/openai/v1 , "
+        "http://localhost:11434/v1 (Ollama), http://localhost:1234/v1 (LM Studio).",
 
     "watcher.poll_minutes": "How often to check the inbox while the watcher runs.",
 }
@@ -327,6 +339,35 @@ SETUP_GUIDES: dict[str, str] = {
         "6. Paste tenant/client/secret here; the refresh token is filled by "
         "the consent flow.\n"
         "'Mailbox / account to monitor' = the UPN of the mailbox to read."
+    ),
+    "openai": (
+        "OpenAI (ChatGPT) API key\n"
+        "1. platform.openai.com > sign in.\n"
+        "2. Settings > Billing - add a payment method / credit.\n"
+        "3. Dashboard > API keys > 'Create new secret key'. Copy it now "
+        "(shown once).\n"
+        "Model: gpt-4o-mini is cheap and accurate for this; gpt-4o for harder "
+        "layouts. Called via POST /v1/chat/completions with JSON mode."
+    ),
+    "openai_compatible": (
+        "OpenAI-compatible endpoint (Azure / OpenRouter / Groq / Ollama / ...)\n"
+        "Anything that serves POST {base}/v1/chat/completions works. Set:\n"
+        "- API base URL (ends in /v1)\n"
+        "- Model id that host exposes\n"
+        "- API Key (blank for local servers)\n\n"
+        "Common hosts:\n"
+        "- OpenRouter: https://openrouter.ai/api/v1  (key: openrouter.ai/keys)\n"
+        "- Groq:       https://api.groq.com/openai/v1 (key: console.groq.com/keys)\n"
+        "- Together:   https://api.together.xyz/v1\n"
+        "- Mistral:    https://api.mistral.ai/v1\n"
+        "- DeepSeek:   https://api.deepseek.com/v1\n"
+        "- Azure OpenAI: https://<resource>.openai.azure.com/openai/deployments/"
+        "<deployment>  (also needs the api-version; see Azure docs)\n"
+        "- Ollama (local):    http://localhost:11434/v1   (no key; run "
+        "'ollama pull llama3.1' first)\n"
+        "- LM Studio (local): http://localhost:1234/v1    (no key; start its "
+        "local server)\n\n"
+        "If the host rejects JSON mode the app automatically retries without it."
     ),
     "gemini": (
         "Google Gemini API key\n"

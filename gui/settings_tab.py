@@ -15,6 +15,7 @@ import customtkinter as ctk
 
 from core import startup as win_startup
 from gui.help_content import FIELD_HELP, SETUP_GUIDES
+from core.parser_ai import AI_PROVIDERS
 from gui.help_dialog import GuideWindow, HelpPopup
 from gui.theme import C, FONT_HEAD, FONT_UI, accent_button
 from integrations.email_outlook import build_backend
@@ -37,10 +38,6 @@ OUTLOOK_BY_BACKEND = {
         ("outlook.graph_client_secret", "Graph Client Secret", True),
         ("outlook.graph_refresh_token", "Graph Refresh Token", True),
     ],
-}
-AI_KEY_BY_PROVIDER = {
-    "gemini": ("ai.gemini_api_key", "Gemini API Key", True),
-    "anthropic": ("ai.anthropic_api_key", "Anthropic API Key", True),
 }
 
 
@@ -81,7 +78,8 @@ class SettingsTab:
             self.frame, "Accounting system",
             [c.label for c in ACCOUNTING_PROVIDERS.values()], self._render)
         self._ai_provider = self._dropdown(
-            self.frame, "AI Provider", ["gemini", "anthropic"], self._render)
+            self.frame, "AI Provider",
+            [m["label"] for m in AI_PROVIDERS.values()], self._render)
 
     def _build_watcher(self) -> None:
         self._header(self.frame, "Watcher")
@@ -169,6 +167,14 @@ class SettingsTab:
                 return k
         return next(iter(table))
 
+    def _ai_key(self) -> str:
+        """Resolve the AI Provider dropdown label back to its provider key."""
+        label = self._ai_provider.get()
+        for k, m in AI_PROVIDERS.items():
+            if m["label"] == label:
+                return k
+        return "gemini"
+
     def _on_backend_change(self) -> None:
         """Remember the Outlook backend choice, then re-render."""
         self._ob_value = self._outlook_backend.get()
@@ -225,11 +231,15 @@ class SettingsTab:
             self._row(self._outlook_box, key, lbl, secret)
 
         # --- AI ---
-        self._header(self._ai_box, f"AI Provider - {self._ai_provider.get()}",
-                     guide_key=self._ai_provider.get())
-        self._row(self._ai_box, "ai.model", "Model name", False)
-        ai_key, ai_lbl, ai_secret = AI_KEY_BY_PROVIDER[self._ai_provider.get()]
-        self._row(self._ai_box, ai_key, ai_lbl, ai_secret)
+        akey = self._ai_key()
+        meta = AI_PROVIDERS[akey]
+        self._header(self._ai_box, f"AI Provider - {meta['label']}", guide_key=akey)
+        self._row(self._ai_box, "ai.model",
+                  f"Model name (blank = {meta['default_model'] or 'server default'})", False)
+        if meta["needs_base_url"]:
+            self._row(self._ai_box, "ai.compat_base_url", "API base URL (ends in /v1)", False)
+        klabel = "API Key" if meta["needs_key"] else "API Key (optional for local servers)"
+        self._row(self._ai_box, meta["key_setting"], klabel, True)
 
     # -- load / save ----------------------------------------
     def load(self) -> None:
@@ -238,7 +248,8 @@ class SettingsTab:
         self._service.set(SERVICE_PROVIDERS.get(svc, SERVICE_PROVIDERS["servicem8"]).label)
         acct = self._settings.get("accounting.provider", "none")
         self._accounting.set(ACCOUNTING_PROVIDERS.get(acct, ACCOUNTING_PROVIDERS["none"]).label)
-        self._ai_provider.set(self._settings.get("ai.provider", "gemini"))
+        ai_prov = self._settings.get("ai.provider", "gemini")
+        self._ai_provider.set(AI_PROVIDERS.get(ai_prov, AI_PROVIDERS["gemini"])["label"])
         self._poll.delete(0, "end")
         self._poll.insert(0, self._settings.get("watcher.poll_minutes", "5"))
         (self._unread_only.select if self._settings.get_bool("watcher.unread_only") else self._unread_only.deselect)()
@@ -253,7 +264,7 @@ class SettingsTab:
                            self._provider_key(self._service, SERVICE_PROVIDERS))
         self._settings.set("accounting.provider",
                            self._provider_key(self._accounting, ACCOUNTING_PROVIDERS))
-        self._settings.set("ai.provider", self._ai_provider.get())
+        self._settings.set("ai.provider", self._ai_key())
         self._settings.set("outlook.backend", self._outlook_backend.get())
         self._settings.set("watcher.poll_minutes", self._poll.get() or "5")
         self._settings.set("watcher.unread_only", "1" if self._unread_only.get() else "0")
@@ -292,7 +303,7 @@ class SettingsTab:
             self._provider_key(self._service, SERVICE_PROVIDERS),
             self._provider_key(self._accounting, ACCOUNTING_PROVIDERS),
             "outlook_graph" if getattr(self, "_ob_value", "com") == "graph" else "outlook_com",
-            self._ai_provider.get(),
+            self._ai_key(),
         ]
         sections = [(k, SETUP_GUIDES[k]) for k in keys if k in SETUP_GUIDES]
         GuideWindow(self._app, sections)

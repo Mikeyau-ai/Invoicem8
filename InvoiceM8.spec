@@ -8,9 +8,10 @@ Notes:
 * pywin32 / Outlook COM needs its submodules named explicitly (they are
   imported lazily inside integrations/email_outlook.py so the analyser
   cannot see them).
-* The AI / Graph / attachment libraries are OPTIONAL - they are only bundled
-  if they are installed in the environment you build from. Install the full
-  requirements.txt first for a build that supports every feature.
+* AI providers are called over plain REST (requests) - no vendor SDKs to bundle.
+* The Graph / attachment libraries are OPTIONAL - only bundled if installed in
+  the environment you build from. Install the full requirements.txt first for a
+  build that supports every feature.
 """
 import os
 
@@ -43,8 +44,7 @@ hiddenimports += [
 ]
 
 # Optional feature libraries - bundled only if present at build time.
-for _pkg in ("google.generativeai", "anthropic", "msal",
-             "pdfminer", "docx", "keyring.backends.Windows"):
+for _pkg in ("msal", "pdfminer", "docx", "keyring.backends.Windows"):
     _bundle(_pkg, optional=True)
 
 _icon = "assets/icon.ico" if os.path.exists("assets/icon.ico") else None

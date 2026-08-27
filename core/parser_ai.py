@@ -1,8 +1,19 @@
 """AI-assisted extraction of customer + job reference from an invoice.
 
 Text is gathered from the email body and any PDF/DOCX attachment, then handed
-to Gemini or Anthropic with a strict JSON-output prompt. A regex fallback runs
-if no AI key is configured or the call fails, so the watcher still functions.
+to an LLM with a strict JSON-output prompt. A regex fallback runs if no AI key
+is configured or the call fails, so the watcher still functions.
+
+Every provider is called over its plain REST API with ``requests`` - no vendor
+SDKs. Supported out of the box:
+
+  * ``openai``            - OpenAI / ChatGPT  (api.openai.com)
+  * ``gemini``            - Google Gemini     (generativelanguage.googleapis.com)
+  * ``anthropic``         - Anthropic Claude  (api.anthropic.com)
+  * ``openai_compatible`` - any OpenAI-compatible ``/chat/completions`` endpoint:
+                            Azure OpenAI, OpenRouter, Groq, Together, Mistral,
+                            DeepSeek, or a local server (Ollama, LM Studio,
+                            llama.cpp, vLLM). Set the base URL in Settings.
 """
 from __future__ import annotations
 
@@ -11,6 +22,8 @@ import logging
 import re
 from dataclasses import dataclass, asdict
 from pathlib import Path
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -74,26 +87,98 @@ def extract_text(path: Path, limit: int = 12000) -> str:
 
 
 # --------------------------------------------------------------------------
-# AI providers
+# AI providers (all plain REST)
 # --------------------------------------------------------------------------
-def _call_gemini(api_key: str, model: str, prompt: str) -> str:
-    import google.generativeai as genai
+#: provider_key -> UI/behaviour metadata. `key_setting` is the settings key
+#: holding that provider's API key; `needs_key` is False for local servers.
+AI_PROVIDERS: dict[str, dict] = {
+    "openai": {
+        "label": "OpenAI (ChatGPT)",
+        "key_setting": "ai.openai_api_key",
+        "default_model": "gpt-4o-mini",
+        "needs_key": True,
+        "needs_base_url": False,
+    },
+    "gemini": {
+        "label": "Google Gemini",
+        "key_setting": "ai.gemini_api_key",
+        "default_model": "gemini-1.5-flash",
+        "needs_key": True,
+        "needs_base_url": False,
+    },
+    "anthropic": {
+        "label": "Anthropic (Claude)",
+        "key_setting": "ai.anthropic_api_key",
+        "default_model": "claude-sonnet-5",
+        "needs_key": True,
+        "needs_base_url": False,
+    },
+    "openai_compatible": {
+        "label": "OpenAI-compatible (Azure / OpenRouter / Groq / Ollama / ...)",
+        "key_setting": "ai.compat_api_key",
+        "default_model": "",
+        "needs_key": False,
+        "needs_base_url": True,
+    },
+}
 
-    genai.configure(api_key=api_key)
-    resp = genai.GenerativeModel(model or "gemini-1.5-flash").generate_content(prompt)
-    return resp.text or ""
+_HTTP_TIMEOUT = 45
+
+
+def _post(url: str, headers: dict, payload: dict) -> dict:
+    """POST JSON, raise for HTTP errors, return the decoded body."""
+    resp = requests.post(url, headers={"Content-Type": "application/json", **headers},
+                         json=payload, timeout=_HTTP_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _call_openai_chat(api_key: str, model: str, prompt: str,
+                      base_url: str = "https://api.openai.com/v1") -> str:
+    """OpenAI /chat/completions - also used for every OpenAI-compatible host."""
+    base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    body = {
+        "model": model or "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        data = _post(f"{base_url}/chat/completions", headers, body)
+    except requests.HTTPError as exc:
+        # Some compatible servers reject response_format - retry without it.
+        if exc.response is not None and exc.response.status_code == 400:
+            body.pop("response_format", None)
+            data = _post(f"{base_url}/chat/completions", headers, body)
+        else:
+            raise
+    return data["choices"][0]["message"]["content"] or ""
+
+
+def _call_gemini(api_key: str, model: str, prompt: str) -> str:
+    """Google Generative Language API - generateContent."""
+    model = model or "gemini-1.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    data = _post(url, {"x-goog-api-key": api_key}, {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"response_mime_type": "application/json", "temperature": 0},
+    })
+    parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+    return "".join(p.get("text", "") for p in parts)
 
 
 def _call_anthropic(api_key: str, model: str, prompt: str) -> str:
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=api_key)
-    msg = client.messages.create(
-        model=model or "claude-sonnet-5",
-        max_tokens=400,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+    """Anthropic Messages API."""
+    data = _post("https://api.anthropic.com/v1/messages", {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    }, {
+        "model": model or "claude-sonnet-5",
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": prompt}],
+    })
+    return "".join(b.get("text", "") for b in data.get("content", [])
+                   if b.get("type") == "text")
 
 
 def _coerce_json(text: str) -> dict:
@@ -140,18 +225,24 @@ class InvoiceParser:
         """Run extraction over one email + its attachments."""
         attachment_text = "\n\n".join(extract_text(p) for p in attachments)[:12000]
         provider = self._settings.get("ai.provider", "gemini")
+        meta = AI_PROVIDERS.get(provider, AI_PROVIDERS["gemini"])
         model = self._settings.get("ai.model", "")
-        key = self._settings.get(
-            "ai.gemini_api_key" if provider == "gemini" else "ai.anthropic_api_key"
-        )
+        key = self._settings.get(meta["key_setting"])
+        base_url = self._settings.get("ai.compat_base_url")
 
-        if key:
+        # Local / compatible servers may not need a key; everyone else does.
+        if key or not meta["needs_key"]:
             prompt = _PROMPT.format(subject=subject, body=body[:6000],
                                     attachment=attachment_text)
             try:
-                raw = (_call_gemini if provider == "gemini" else _call_anthropic)(
-                    key, model, prompt
-                )
+                if provider == "openai":
+                    raw = _call_openai_chat(key, model, prompt)
+                elif provider == "openai_compatible":
+                    raw = _call_openai_chat(key, model, prompt, base_url)
+                elif provider == "anthropic":
+                    raw = _call_anthropic(key, model, prompt)
+                else:
+                    raw = _call_gemini(key, model, prompt)
                 data = _coerce_json(raw)
                 if data:
                     return ParseResult(
