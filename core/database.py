@@ -242,6 +242,12 @@ class Database:
             (like, like, like, like, like, like, limit),
         )
 
+    def clear_activity_log(self) -> int:
+        """Delete all activity_log rows. Returns how many were removed."""
+        n = len(self._query("SELECT id FROM activity_log"))
+        self._exec("DELETE FROM activity_log")
+        return n
+
     def add_error(self, **kw: Any) -> int:
         kw.setdefault("ts", _utcnow())
         keys = ("ts", "stage", "customer_name", "invoice_ref", "filename",

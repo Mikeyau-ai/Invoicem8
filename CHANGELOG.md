@@ -3,6 +3,11 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.6
+- Activity Log: "Clear" is now two buttons - **Clear filter** (resets the
+  search box, also on Esc) and **Clear log** (permanently deletes the stored
+  activity history, with a confirmation). The error log is unaffected.
+
 ## 1.0.5
 - In-app **About / Changelog** window (click the InvoiceM8 wordmark in the
   header, or Settings > Updates > About / Changelog). Shows the version, a
