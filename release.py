@@ -71,7 +71,7 @@ def main() -> int:
 
     tag = f"v{APP_VERSION}"
     notes = (
-        f"## What's new\n\n{changelog(tag)}\n\n"
+        f"## What's new\n\n{changelog(APP_VERSION)}\n\n"
         "---\n\n"
         "Download `InvoiceM8.exe` and run it - no install, no admin. It is "
         "unsigned, so Windows SmartScreen shows \"Windows protected your PC\": "
