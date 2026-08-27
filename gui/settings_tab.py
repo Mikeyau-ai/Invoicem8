@@ -64,6 +64,7 @@ class SettingsTab:
         self._ai_box.pack(fill="x")
 
         self._build_watcher()
+        self._build_updates()
         self._build_actions()
 
         self.load()
@@ -95,6 +96,25 @@ class SettingsTab:
         self._autostart.pack(anchor="w", padx=6, pady=4)
         self._run_startup = ctk.CTkSwitch(self.frame, text="Run InvoiceM8 on Windows startup")
         self._run_startup.pack(anchor="w", padx=6, pady=4)
+
+    def _build_updates(self) -> None:
+        from core import updater
+        from version import APP_VERSION
+
+        self._header(self.frame, "Updates")
+        ctk.CTkLabel(self.frame, text=f"Current version: {APP_VERSION}"
+                     + ("" if updater.is_frozen() else "  (running from source)"),
+                     font=FONT_UI, text_color=C["dim"]).pack(anchor="w", padx=6)
+        self._auto_update = ctk.CTkSwitch(
+            self.frame, text="Automatically check for updates on launch",
+            command=lambda: updater.set_enabled(bool(self._auto_update.get())))
+        self._auto_update.pack(anchor="w", padx=6, pady=4)
+        row = ctk.CTkFrame(self.frame, fg_color=C["bg"])
+        row.pack(fill="x", padx=6, pady=2)
+        accent_button(ctk, row, "Check for updates now",
+                      lambda: self._app.check_updates_now(
+                          lambda t: self._status.configure(text=t, text_color=C["dim"])),
+                      colour=C["blue"]).pack(side="left")
 
     def _build_actions(self) -> None:
         bar = ctk.CTkFrame(self.frame, fg_color=C["bg"])
@@ -255,6 +275,8 @@ class SettingsTab:
         (self._unread_only.select if self._settings.get_bool("watcher.unread_only") else self._unread_only.deselect)()
         (self._autostart.select if self._settings.get_bool("watcher.autostart") else self._autostart.deselect)()
         (self._run_startup.select if win_startup.is_enabled() else self._run_startup.deselect)()
+        from core import updater
+        (self._auto_update.select if updater.auto_check_pref() else self._auto_update.deselect)()
         self._render()
 
     def _save(self) -> None:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import customtkinter as ctk
 
+from core import updater
 from core.database import Database
 from core.router import Router
 from core.settings_store import Settings
@@ -20,9 +21,9 @@ from gui.errors_tab import ErrorsTab
 from gui.logs_tab import LogsTab
 from gui.settings_tab import SettingsTab
 from gui.theme import C, FONT_TAGLINE, FONT_UI, FONT_WORDMARK, accent_button
+from gui.update_dialog import UpdateDialog
 from integrations.registry import label_for
-
-APP_VERSION = "1.0.0"
+from version import APP_VERSION
 
 
 class App(ctk.CTk):
@@ -61,6 +62,10 @@ class App(ctk.CTk):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(400, self._pump)
+
+        # Auto-update check (no-ops when running from source or when disabled).
+        self._update_shown = False
+        updater.start_check()
 
         if autostart or settings.get_bool("watcher.autostart"):
             self.after(800, self.watcher.start)
@@ -142,7 +147,34 @@ class App(ctk.CTk):
                 self._handle_new_customer(name, pid)
         except queue.Empty:
             pass
+
+        if not self._update_shown:
+            info = updater.pending_update()
+            if info is not None:
+                self._update_shown = True
+                UpdateDialog(self, info)
+
         self.after(400, self._pump)
+
+    # -- updates ----------------------------------------------
+    def check_updates_now(self, on_result) -> None:
+        """Manual check from Settings. Calls on_result(text) on the Tk thread."""
+        import threading
+
+        def work() -> None:
+            info = updater.check_now()
+            def show() -> None:
+                if info is None:
+                    on_result(f"You're up to date (v{APP_VERSION})."
+                              if updater.is_frozen()
+                              else "Update check only runs in the built .exe.")
+                else:
+                    self._update_shown = True
+                    UpdateDialog(self, info)
+                    on_result(f"Version {info.version} available.")
+            self.after(0, show)
+
+        threading.Thread(target=work, daemon=True).start()
 
     # -- new customer modal + replay ---------------------------
     def _handle_new_customer(self, name: str, pending_id: int) -> None:

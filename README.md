@@ -33,6 +33,22 @@ Build from an environment with the full `requirements.txt` installed so the AI
 are missing. Settings and the database still live in `%LOCALAPPDATA%\InvoiceM8`,
 so the exe stays stateless and can be replaced in place to update.
 
+## Releasing updates
+
+```bash
+:: bump version.py, commit, then:
+release.bat
+```
+
+Builds the exe and publishes it as a GitHub release tagged `v<version>`.
+Installed builds check `releases/latest` on launch (and via **Settings >
+Updates > Check for updates now**), download the new `InvoiceM8.exe`, and swap
+it in via a detached helper. Auto-check can be turned off in Settings; running
+from source never prompts.
+
+Permanent download link:
+`https://github.com/Mikeyau-ai/Invoicem8/releases/latest/download/InvoiceM8.exe`
+
 ## First run
 
 1. **Settings tab** – choose the accounting system, enter credentials, save.
@@ -59,6 +75,7 @@ so the exe stays stateless and can be replaced in place to update.
 | Routing   | `core/router.py`, `core/watcher.py` |
 | Providers | `integrations/accounting/*` + `registry.py` |
 | Startup   | `core/startup.py` (HKCU Run key) |
+| Updates   | `core/updater.py`, `gui/update_dialog.py`, `release.py` |
 | GUI       | `gui/*` (CustomTkinter, RamBo theme in `gui/theme.py`) |
 
 ## Caveats

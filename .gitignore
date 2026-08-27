@@ -18,6 +18,8 @@ dist/
 .masterkey
 attachments/
 logs/
+*.log
+updater.json
 
 # Editor / OS
 .vscode/

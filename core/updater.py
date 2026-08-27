@@ -1,0 +1,300 @@
+"""Self-update for frozen InvoiceM8 builds.
+
+Mirrors the updater pattern used by the other apps (RamBo / Ashen Fall):
+check GitHub Releases for a newer ``InvoiceM8.exe``, download it, and swap it
+in via a detached helper script (a running exe cannot overwrite itself).
+
+* Stdlib only (urllib / json / threading) - adds nothing to requirements and
+  can run before the GUI is up.
+* Inactive when running from source (``sys.frozen`` is False): a dev tree may
+  legitimately be ahead of the published release.
+* Never raises for network problems - a failed check is a silent no-op.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+# Public repo whose Releases host the build. Overridable for testing.
+GITHUB_REPO = os.getenv("INVOICEM8_UPDATE_REPO", "Mikeyau-ai/Invoicem8")
+_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+_ASSET_NAME = "InvoiceM8.exe"
+_UA = "InvoiceM8-Updater"
+_CHECK_TIMEOUT = 8
+
+USER_ROOT = Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "InvoiceM8"
+_UPDATE_DIR = USER_ROOT / "updates"
+_STATE = USER_ROOT / "updater.json"
+
+
+# -- tiny JSON state (two keys, not worth the DB) -----------------------
+def _state() -> dict:
+    try:
+        return json.loads(_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_state(key: str, value) -> None:
+    data = _state()
+    data[key] = value
+    try:
+        USER_ROOT.mkdir(parents=True, exist_ok=True)
+        _STATE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+# -- version helpers --------------------------------------------------
+def _parse_version(text: str) -> tuple[int, ...]:
+    """'v1.2.3' / '1.2.3' -> (1, 2, 3). Junk -> (0,) so it always sorts oldest."""
+    nums = re.findall(r"\d+", text or "")
+    return tuple(int(n) for n in nums) if nums else (0,)
+
+
+def current_version() -> str:
+    """Running build's version."""
+    try:
+        from version import APP_VERSION
+        return APP_VERSION
+    except Exception:
+        return "0.0.0"
+
+
+def running_exe() -> Path:
+    """Absolute path of the running executable (only meaningful when frozen)."""
+    return Path(sys.executable).resolve()
+
+
+def is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def is_enabled() -> bool:
+    """True only for a frozen build with the auto-check left switched on."""
+    return is_frozen() and bool(_state().get("update_check", True))
+
+
+def set_enabled(on: bool) -> None:
+    _save_state("update_check", bool(on))
+
+
+def auto_check_pref() -> bool:
+    """The stored preference regardless of frozen state (for the Settings UI)."""
+    return bool(_state().get("update_check", True))
+
+
+# -- update info ----------------------------------------------------
+@dataclass
+class UpdateInfo:
+    """A newer release found on GitHub."""
+
+    version: str
+    url: str
+    size: int
+    notes: str
+
+    @property
+    def size_mb(self) -> float:
+        return self.size / (1024 * 1024)
+
+    def note_lines(self) -> list[str]:
+        """Changelog as plain bullets; stops at the '---' boilerplate rule."""
+        out: list[str] = []
+        for raw in (self.notes or "").splitlines():
+            line = raw.strip()
+            if line.startswith("---"):
+                break
+            if line.startswith("#") or not line:
+                continue
+            line = line.lstrip("-*").replace("**", "").replace("`", "").strip()
+            if line:
+                out.append(line)
+        return out[:12]
+
+
+def _fetch_latest() -> UpdateInfo | None:
+    """Query the Releases API. Returns None for every failure mode."""
+    req = urllib.request.Request(
+        _API_LATEST,
+        headers={"User-Agent": _UA, "Accept": "application/vnd.github+json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_CHECK_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return None
+
+    tag = (data.get("tag_name") or "").lstrip("vV")
+    if not tag:
+        return None
+    for asset in data.get("assets") or []:
+        if (asset.get("name") or "").lower() == _ASSET_NAME.lower():
+            return UpdateInfo(
+                version=tag,
+                url=asset.get("browser_download_url") or "",
+                size=int(asset.get("size") or 0),
+                notes=(data.get("body") or "").strip(),
+            )
+    return None
+
+
+def _is_newer(info: UpdateInfo) -> bool:
+    if _parse_version(info.version) <= _parse_version(current_version()):
+        return False
+    return _state().get("skip_version") != info.version
+
+
+def skip_version(version: str) -> None:
+    """Remember a declined version so it is not re-offered automatically."""
+    _save_state("skip_version", version)
+
+
+# -- background check ------------------------------------------------
+_result: UpdateInfo | None = None
+_done = threading.Event()
+
+
+def start_check() -> None:
+    """Kick off the version check on a daemon thread. No-ops from source or
+    when auto-update is disabled."""
+    if not is_enabled():
+        _done.set()
+        return
+
+    def _work() -> None:
+        global _result
+        try:
+            info = _fetch_latest()
+            if info and info.url and _is_newer(info):
+                _result = info
+        finally:
+            _done.set()
+
+    threading.Thread(target=_work, daemon=True, name="update-check").start()
+
+
+def pending_update() -> UpdateInfo | None:
+    """The update found by :func:`start_check`, once the check has finished."""
+    return _result if _done.is_set() else None
+
+
+def check_now() -> UpdateInfo | None:
+    """Synchronous check that ignores the enabled flag - for the 'Check now'
+    button. Returns a newer release (even a skipped one) or None."""
+    info = _fetch_latest()
+    if info and info.url and _parse_version(info.version) > _parse_version(current_version()):
+        return info
+    return None
+
+
+# -- download + apply ---------------------------------------------
+def download(info: UpdateInfo, progress_cb=None, cancel=None) -> Path | None:
+    """Download the new exe to the updates dir. Returns its path or None.
+
+    ``progress_cb(done, total)`` is called as chunks arrive; ``cancel()`` is
+    polled per chunk. Never leaves a partial file behind.
+    """
+    _UPDATE_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _UPDATE_DIR / f"InvoiceM8-{info.version}.exe"
+    part = dest.with_suffix(".exe.part")
+
+    for old in _UPDATE_DIR.glob("InvoiceM8-*.exe"):
+        if old != dest:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+    req = urllib.request.Request(info.url, headers={"User-Agent": _UA})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            total = int(resp.headers.get("Content-Length") or info.size or 0)
+            got = 0
+            with open(part, "wb") as fh:
+                while True:
+                    if cancel is not None and cancel():
+                        raise InterruptedError("cancelled")
+                    chunk = resp.read(256 * 1024)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    got += len(chunk)
+                    if progress_cb:
+                        progress_cb(got, total)
+    except Exception:
+        part.unlink(missing_ok=True)
+        return None
+
+    try:
+        dest.unlink(missing_ok=True)
+        part.rename(dest)
+    except OSError:
+        part.unlink(missing_ok=True)
+        return None
+    return dest
+
+
+# A running exe can't overwrite itself: a detached cmd waits for us to exit,
+# copies the new file over, and relaunches. Tools called by absolute path so a
+# Unix `find` on PATH can't shadow the wait loop.
+_APPLY_SCRIPT = """@echo off
+setlocal
+set "TASKLIST=%SystemRoot%\\System32\\tasklist.exe"
+set "FIND=%SystemRoot%\\System32\\find.exe"
+set "PING=%SystemRoot%\\System32\\ping.exe"
+
+set /a tries=0
+:wait
+"%TASKLIST%" /fi "PID eq {pid}" /nh 2>nul | "%FIND%" "{pid}" >nul
+if errorlevel 1 goto ready
+set /a tries+=1
+if %tries% GEQ 60 (
+  echo InvoiceM8 did not exit; update cancelled.
+  pause
+  exit /b 1
+)
+"%PING%" -n 2 127.0.0.1 >nul
+goto wait
+
+:ready
+rem Onefile bootloader parent can hold the exe briefly after the child exits.
+"%PING%" -n 3 127.0.0.1 >nul
+copy /y "{src}" "{dst}" >nul
+if errorlevel 1 (
+  echo InvoiceM8 update failed to copy the new file.
+  pause
+  exit /b 1
+)
+start "" "{dst}"
+del /q "{src}" >nul 2>&1
+"""
+
+
+def apply(exe_path: Path) -> bool:
+    """Launch the detached swap script. Caller must exit immediately after."""
+    dst = running_exe()
+    script = _UPDATE_DIR / "apply_update.cmd"
+    try:
+        script.write_text(
+            _APPLY_SCRIPT.format(pid=os.getpid(), src=str(exe_path), dst=str(dst)),
+            encoding="utf-8",
+        )
+        subprocess.Popen(
+            ["cmd", "/c", str(script)],
+            close_fds=True,
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return True
+    except OSError:
+        return False
