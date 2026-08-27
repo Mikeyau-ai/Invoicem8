@@ -313,6 +313,15 @@ if errorlevel 1 goto copyfail
 echo    [ OK ] New version copied into place.
 del /q "{src}" >nul 2>&1
 echo    [....] Restarting InvoiceM8...
+rem Clear PyInstaller's onefile env vars so the fresh exe starts as a new
+rem top-level process instead of failing the "parent process" security check.
+set "_MEIPASS2="
+set "_MEIPASS="
+set "_PYI_ARCHIVE_FILE="
+set "_PYI_PARENT_PROCESS_LEVEL="
+set "_PYI_APPLICATION_HOME_DIR="
+set "_PYIBoot_SPLASH="
+set "_PYI_SPLASH_IPC="
 start "" "{dst}"
 echo    [ OK ] Done - InvoiceM8 v{ver} is starting.
 echo.
@@ -345,9 +354,15 @@ def apply(exe_path: Path, version: str = "") -> bool:
                                  dst=str(dst), ver=version or current_version()),
             encoding="utf-8",
         )
+        # Hand the helper a clean environment: PyInstaller's onefile bootloader
+        # exports _PYI_* / _MEIPASS* vars that would make the relaunched exe
+        # think it is a child re-exec and abort with a security-check error.
+        clean_env = {k: v for k, v in os.environ.items()
+                     if not k.startswith(("_PYI", "_MEI"))}
         subprocess.Popen(
             ["cmd", "/c", str(script)],
             close_fds=True,
+            env=clean_env,
             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
         )

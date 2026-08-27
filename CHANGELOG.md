@@ -3,6 +3,16 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.7
+- Fixed the auto-update relaunch: the freshly-installed exe could fail to
+  start with a "parent process has different executable" security error
+  because it inherited PyInstaller's onefile environment variables. The
+  updater now hands it a clean environment.
+- Disabled UPX compression on the build - UPX-packed executables trip
+  antivirus heuristics (AVG/Defender flagging the download).
+- Release notes are now taken from CHANGELOG.md, so the in-app "What's new"
+  shows the real change list instead of "First release."
+
 ## 1.0.6
 - Activity Log: "Clear" is now two buttons - **Clear filter** (resets the
   search box, also on Esc) and **Clear log** (permanently deletes the stored

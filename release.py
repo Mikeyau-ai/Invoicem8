@@ -24,17 +24,31 @@ def gh(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["gh", *args], capture_output=True, text=True)
 
 
-def changelog(tag: str) -> str:
-    """Commit subjects since the previous tag, as markdown bullets."""
-    prev = subprocess.run(["git", "describe", "--tags", "--abbrev=0", f"{tag}^"],
-                          capture_output=True, text=True)
-    if prev.returncode != 0 or not prev.stdout.strip():
-        return "- First release."
-    span = f"{prev.stdout.strip()}..{tag}"
-    log = subprocess.run(["git", "log", span, "--no-merges", "--pretty=%s"],
-                         capture_output=True, text=True)
-    lines = [l.strip() for l in log.stdout.splitlines() if l.strip()]
-    return "\n".join("- " + l for l in lines[:20]) or "- Maintenance release."
+def changelog(version: str) -> str:
+    """The CHANGELOG.md section for this version, verbatim.
+
+    CHANGELOG.md is the single source of truth (it is also bundled into the
+    exe for the in-app About window). We don't derive notes from git tags -
+    releases are tagged by `gh release create`, so the tag does not exist
+    locally when this runs.
+    """
+    try:
+        text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+    except OSError:
+        return "- See the commit history."
+
+    out: list[str] = []
+    capturing = False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if capturing:
+                break
+            capturing = line[3:].strip() == version
+            continue
+        if capturing and (line.strip() or out):
+            out.append(line.rstrip())
+    body = "\n".join(out).strip()
+    return body or f"- Release {version}. See CHANGELOG.md for details."
 
 
 def main() -> int:
