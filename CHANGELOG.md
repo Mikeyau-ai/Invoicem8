@@ -3,6 +3,11 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.8
+- Update dialog: wrapped changelog bullets are joined back into one entry
+  each, so "What's new" reads as a clean list instead of a spurious extra
+  dash on every continuation line.
+
 ## 1.0.7
 - Fixed the auto-update relaunch: the freshly-installed exe could fail to
   start with a "parent process has different executable" security error

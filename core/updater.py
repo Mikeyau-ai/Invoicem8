@@ -107,7 +107,11 @@ class UpdateInfo:
         return self.size / (1024 * 1024)
 
     def note_lines(self) -> list[str]:
-        """Changelog as plain bullets; stops at the '---' boilerplate rule."""
+        """Changelog as one string per bullet; stops at the '---' rule.
+
+        Wrapped bullets (a bullet whose text continues on indented lines) are
+        joined back together so the dialog shows one entry per change.
+        """
         out: list[str] = []
         for raw in (self.notes or "").splitlines():
             line = raw.strip()
@@ -115,10 +119,14 @@ class UpdateInfo:
                 break
             if line.startswith("#") or not line:
                 continue
-            line = line.lstrip("-*").replace("**", "").replace("`", "").strip()
-            if line:
-                out.append(line)
-        return out[:12]
+            clean = line.replace("**", "").replace("`", "").strip()
+            if line.startswith(("-", "*")):
+                out.append(clean.lstrip("-*").strip())
+            elif out:                       # continuation of the previous bullet
+                out[-1] = f"{out[-1]} {clean}".strip()
+            else:
+                out.append(clean)
+        return out[:15]
 
 
 def _fetch_latest() -> UpdateInfo | None:
