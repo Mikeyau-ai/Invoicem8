@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Build
+build/
+dist/
+*.spec
+
+# Local runtime data / secrets (InvoiceM8 stores these in %LOCALAPPDATA%,
+# but ignore any that land here too)
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+.masterkey
+attachments/
+logs/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
