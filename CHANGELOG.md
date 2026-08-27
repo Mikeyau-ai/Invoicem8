@@ -3,6 +3,10 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.9
+- Update dialog: the "What's new" box now word-wraps (it was breaking
+  mid-word) and uses bullet points.
+
 ## 1.0.8
 - Update dialog: wrapped changelog bullets are joined back into one entry
   each, so "What's new" reads as a clean list instead of a spurious extra

@@ -33,10 +33,11 @@ class UpdateDialog(ctk.CTkToplevel):
                      text_color=C["dim"]).pack(anchor="w", padx=20)
 
         notes = ctk.CTkTextbox(self, font=FONT_UI, fg_color=C["row"],
-                               text_color=C["text"], height=210)
+                               text_color=C["text"], height=210, wrap="word")
         notes.pack(fill="both", expand=True, padx=20, pady=12)
         lines = info.note_lines() or ["(no release notes)"]
-        notes.insert("1.0", "What's new:\n" + "\n".join(f"  - {l}" for l in lines))
+        notes.insert("1.0", "What's new:\n\n"
+                     + "\n".join(f"  • {l}" for l in lines))
         notes.configure(state="disabled")
 
         self._bar = ctk.CTkProgressBar(self)
