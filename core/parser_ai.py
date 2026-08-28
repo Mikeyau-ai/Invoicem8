@@ -40,7 +40,19 @@ Return ONLY minified JSON with these keys:
   invoice_ref    - the invoice / credit note number, else ""
   amount_total   - total incl. tax as a number string, else ""
   invoice_date   - ISO date if present, else ""
-  doc_type       - "credit" if this is a CREDIT of any kind (credit note,
+  doc_type       - what KIND of document this is, one of:
+                     "invoice"    - a supplier invoice/bill asking for payment
+                     "credit"     - a credit of any kind (see below)
+                     "statement"  - a statement of account listing several
+                                    invoices; NOT itself a payable document
+                     "quote"      - a quotation or estimate
+                     "remittance" - a remittance/payment advice
+                     "delivery"   - a delivery docket or packing slip
+                     "other"      - anything else (catalogue, terms, letter)
+                   Only "invoice" and "credit" get filed. If the document is
+                   genuinely an invoice, say invoice even when it also mentions
+                   a quote or purchase order number.
+                   "credit" applies if this is a CREDIT of any kind (credit note,
                    credit memo, adjustment note, credit invoice, refund),
                    otherwise "invoice". The word "credit" is the deciding
                    signal - but ignore ordinary payment wording such as
@@ -352,6 +364,58 @@ _CREDIT_STRONG = re.compile(
     r"|\bRCTI\s*credit\b", re.I)
 
 
+#: Document kinds that are NOT payable and must not be filed against a job.
+NON_INVOICE_KINDS = {"statement", "quote", "remittance", "delivery", "other"}
+
+#: Ordered strongest-first: the first pattern to hit decides the kind. Credit
+#: is checked separately (see _looks_like_credit) because it is the one label
+#: suppliers are consistent about.
+_KIND_PATTERNS = (
+    ("statement", r"statement\s+of\s+account|monthly\s+statement"
+                  r"|brought\s+forward|ageing\s+summary"),
+    ("remittance", r"remittance\s+advice|payment\s+advice"
+                   r"|remittance"),
+    ("quote", r"quotation|quote\s*(?:no|number|#)|estimate\s*(?:no|#)"),
+    ("delivery", r"delivery\s+(?:docket|note)|packing\s+(?:slip|list)"
+                 r"|consignment\s+note"),
+)
+
+#: Wording that means the document really is a payable invoice, which wins over
+#: an incidental mention of a quote or delivery number.
+_IS_INVOICE = re.compile(r"tax\s*invoice|invoice\s*(?:no|number|#|date)"
+                         r"|amount\s+due|please\s+pay", re.I)
+
+
+def _normalise_kind(value) -> str:
+    """Coerce a model's doc_type answer to one of the known kinds."""
+    text = str(value or "").strip().lower()
+    if text.startswith("credit"):
+        return "credit"
+    for kind in ("statement", "remittance", "quote", "delivery", "other"):
+        if text.startswith(kind):
+            return kind
+    return "invoice"
+
+
+def classify_document(blob: str) -> str:
+    """Best-effort document kind from its wording.
+
+    Suppliers send statements, quotes, remittances and delivery dockets to the
+    same mailbox as invoices. Filing those against a job is wrong, so identify
+    them and skip rather than assume every attachment is payable.
+    """
+    if _looks_like_credit(blob):
+        return "credit"
+    if _IS_INVOICE.search(blob):
+        return "invoice"
+    for kind, pattern in _KIND_PATTERNS:
+        if re.search(pattern, blob, re.I):
+            return kind
+    # Default to invoice: skipping a real invoice is worse than filing an
+    # unclassifiable one, which a human will see on the job anyway.
+    return "invoice"
+
+
 def _looks_like_credit(blob: str) -> bool:
     """True when the document is a credit rather than an invoice.
 
@@ -386,9 +450,9 @@ def _reference_candidates(blob: str, filenames: str, *first) -> list[str]:
 
     for value in first:                      # labelled job / invoice / filename
         add(value)
-    for m in re.finditer(r"\d{3,}", filenames):
+    for m in re.finditer(r"\d{3,}", filenames):
         add(m.group(0))
-    for m in re.finditer(r"[A-Za-z]{0,4}[-/]?\d{3,}", blob):
+    for m in re.finditer(r"[A-Za-z]{0,4}[-/]?\d{3,}", blob):
         add(m.group(0))
     return out[:12]                          # bounded: each costs a lookup
 
@@ -481,7 +545,7 @@ def _regex_fallback(subject: str, body: str, attachment: str,
     # Deliberately NOT "bill to"/"to": on an incoming invoice that party is us.
     cust = re.search(r"(?:from|supplier|vendor|issued\s*by|remit\s*to|pay\s*to)"
                      r"\s*[:\-]\s*(.+)", blob, re.I)
-    is_credit = _looks_like_credit(blob)
+    kind = classify_document(blob)
 
     fn_name, fn_num = _from_filename(filenames)
     candidates = _reference_candidates(blob, filenames, job_number, invoice_ref, fn_num)
@@ -494,7 +558,7 @@ def _regex_fallback(subject: str, body: str, attachment: str,
         customer_name=customer,
         job_number=job_number,
         invoice_ref=invoice_ref,
-        doc_type="credit" if is_credit else "invoice",
+        doc_type=kind,
         job_candidates=candidates,
         confidence=0.5 if (customer and job_number) else (0.2 if customer else 0.0),
         source="regex+filename" if (fn_name or fn_num) else "regex",
@@ -607,8 +671,7 @@ class InvoiceParser:
                         job_candidates=[str(v).strip() for v in
                                         (data.get("job_candidates") or [])
                                         if str(v).strip()],
-                        doc_type=("credit" if str(data.get("doc_type", "")).strip().lower()
-                                  .startswith("credit") else "invoice"),
+                        doc_type=_normalise_kind(data.get("doc_type")),
                         confidence=float(data.get("confidence", 0) or 0),
                         source=provider,
                     )

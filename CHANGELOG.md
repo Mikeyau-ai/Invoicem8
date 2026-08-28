@@ -3,6 +3,21 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.36
+- **Not every attachment is an invoice.** Documents are now classified before
+  anything is filed: statements of account, quotes, remittance advices and
+  delivery dockets are skipped with a line in the Activity Log instead of
+  being attached to a job. A document that merely mentions a quote or PO but
+  is clearly a tax invoice is still treated as an invoice, and anything
+  unrecognisable defaults to invoice - skipping a real one is the worse error.
+- **Low-confidence readings no longer invent suppliers.** New setting
+  "Min confidence to add a supplier" (Settings > Watcher, default 0.4): below
+  it, an unrecognised supplier is NOT created - the invoice is held and
+  explained in the Error Log. Invoices matching a supplier already on file are
+  unaffected, since the name match is its own evidence.
+- Fixed a batch of regex patterns whose word boundaries had been written as
+  literal control characters, which silently stopped them matching.
+
 ## 1.0.35
 - **Fixed the wrong party being extracted.** InvoiceM8 files invoices a
   business RECEIVES from its suppliers, but the parser was asking for the

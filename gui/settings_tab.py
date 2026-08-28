@@ -156,6 +156,17 @@ class SettingsTab:
                    "Downloaded attachments are kept this long so a failed upload "
                    "can still be retried, then deleted. 0 disables the cleanup.")
 
+        conf_row = ctk.CTkFrame(self.frame, fg_color=C["bg"])
+        conf_row.pack(fill="x", padx=6, pady=3)
+        ctk.CTkLabel(conf_row, text="Min confidence to add a supplier", font=FONT_UI,
+                     text_color=C["text"], width=250, anchor="w").pack(side="left")
+        self._min_conf = ctk.CTkEntry(conf_row, width=80)
+        self._min_conf.pack(side="left")
+        self._note(self.frame,
+                   "0 to 1. Below this, a supplier the app has never seen is NOT "
+                   "created automatically - the invoice is held for you instead. "
+                   "Invoices for suppliers already on file are unaffected.")
+
         self._unread_only = ctk.CTkSwitch(
             self.frame,
             text="Only process UNREAD emails  (off = every invoice since the last check)")
@@ -435,6 +446,8 @@ class SettingsTab:
         self._ai_provider.set(AI_PROVIDERS.get(ai_prov, AI_PROVIDERS["gemini"])["label"])
         self._poll.delete(0, "end")
         self._poll.insert(0, self._settings.get("watcher.poll_minutes", "5"))
+        self._min_conf.delete(0, "end")
+        self._min_conf.insert(0, self._settings.get("customers.min_confidence", "0.4"))
         self._cache_days.delete(0, "end")
         self._cache_days.insert(0, self._settings.get("watcher.cache_days", "30"))
         (self._unread_only.select if self._settings.get_bool("watcher.unread_only") else self._unread_only.deselect)()
@@ -479,6 +492,7 @@ class SettingsTab:
         self._settings.set("ai.provider", self._ai_key())
         self._settings.set("outlook.backend", self._outlook_backend.get())
         self._settings.set("watcher.poll_minutes", self._poll.get() or "5")
+        self._settings.set("customers.min_confidence", self._min_conf.get() or "0.4")
         self._settings.set("watcher.cache_days", self._cache_days.get() or "30")
         self._settings.set("watcher.unread_only", "1" if self._unread_only.get() else "0")
         self._settings.set("watcher.autostart", "1" if self._autostart.get() else "0")

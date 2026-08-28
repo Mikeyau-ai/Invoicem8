@@ -66,6 +66,10 @@ DEFAULTS = {
     "ai.provider": "gemini",              # openai | gemini | anthropic | openai_compatible
     "ai.model": "",                       # blank -> provider default
     "ai.compat_base_url": "http://localhost:11434/v1",  # OpenAI-compatible endpoint
+    # Below this confidence a supplier is NOT created automatically; the
+    # invoice is held for a human instead. Routing to a KNOWN supplier is
+    # unaffected - the name match is its own evidence.
+    "customers.min_confidence": "0.4",
     "watcher.poll_minutes": "5",
     "watcher.cache_days": "30",           # attachment-cache retention
     "watcher.unread_only": "0",   # dedupe is by message-id, not the read flag
@@ -102,6 +106,13 @@ class Settings:
         """Read a setting as an int, falling back on anything unparseable."""
         try:
             return int(self.get(key, str(default)))
+        except (TypeError, ValueError):
+            return default
+
+    def get_float(self, key: str, default: float = 0.0) -> float:
+        """Read a setting as a float, falling back when unset or malformed."""
+        try:
+            return float(self.get(key, str(default)))
         except (TypeError, ValueError):
             return default
 

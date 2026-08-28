@@ -80,6 +80,19 @@ class Router:
     def route(self, parsed: ParseResult, attachments: list[Path],
               subject: str, sender: str) -> str:
         """Process every attachment for one email. Returns a short result tag."""
+        from core.parser_ai import NON_INVOICE_KINDS
+
+        # Suppliers send statements, quotes, remittances and delivery dockets
+        # to the same mailbox. Filing those against a job would be wrong.
+        if parsed.doc_type in NON_INVOICE_KINDS:
+            for path in attachments:
+                self._emit(level="INFO", customer_name=parsed.customer_name,
+                           invoice_ref=parsed.invoice_ref, platform="-",
+                           action="skipped", filename=path.name,
+                           message=f"Not a payable document (looks like a "
+                                   f"{parsed.doc_type}) - nothing filed.")
+            return "not_an_invoice"
+
         customer = self._db.find_customer_by_name(parsed.customer_name)
 
         if customer is None:
@@ -97,12 +110,16 @@ class Router:
                     file_path=str(path),
                     raw_json=json.dumps(parsed.as_dict()),
                 )
-                self._emit(level="WARN", customer_name="(unknown)",
+                read = (parsed.customer_name or "").strip()
+                why = (f"Supplier read as '{read}' but not confident enough to "
+                       f"add it automatically"
+                       if read else
+                       "No supplier name could be read from this invoice")
+                self._emit(level="WARN", customer_name=read or "(unknown)",
                            invoice_ref=parsed.invoice_ref, platform="-",
                            action="queued", filename=path.name,
-                           message="No customer name could be read from this "
-                                   "invoice - add the customer manually, then "
-                                   "retry it from the Error Log.")
+                           message=f"{why} - add the supplier in the Suppliers "
+                                   f"tab, then retry from the Error Log.")
             return "pending_new_customer"
 
         allowed = set(customer["file_types"].split(","))
@@ -151,6 +168,21 @@ class Router:
         """
         name = (parsed.customer_name or "").strip()
         if not name:
+            return None
+
+        # Gate only the CREATION of a supplier, not routing: matching an
+        # existing supplier is itself evidence the name is right, but inventing
+        # one from a doubtful reading pollutes the list and mis-files invoices.
+        floor = self._settings.get_float("customers.min_confidence", 0.4)
+        if parsed.confidence < floor:
+            self._emit(level="WARN", customer_name=name,
+                       invoice_ref=parsed.invoice_ref, platform="-",
+                       action="held",
+                       message=f"Supplier '{name}' read with low confidence "
+                               f"({parsed.confidence:.2f} < {floor:.2f}), so it "
+                               f"was NOT added automatically. Add the supplier "
+                               f"in the Suppliers tab, then retry from the "
+                               f"Error Log.")
             return None
         try:
             cid = self._db.upsert_customer({
