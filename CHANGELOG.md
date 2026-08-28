@@ -3,6 +3,17 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.24
+- The sign-in window now prints exactly what it is about to use - Client ID
+  (masked, with a length/format check), tenant, authority and scopes - so a
+  blank or mistyped Client ID is obvious instead of being guessed at from
+  Microsoft's error pages.
+- Sign-in now REFUSES to start when the Client ID is empty or not a 36-char
+  GUID. Sending Microsoft a malformed client_id produced wildly misleading
+  results, including a sign-in page that ended up putting the password in the
+  URL. The app no longer lets that request be made.
+- The same configuration summary is written to invoicem8.log.
+
 ## 1.0.23
 - **Fixed silent credential loss.** If the local encryption key in Windows
   Credential Manager is lost or regenerated, every saved API key, client ID

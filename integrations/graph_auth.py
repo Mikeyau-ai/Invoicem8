@@ -153,3 +153,35 @@ def access_token(settings) -> str:
             "Microsoft sign-in has expired. Open Settings > Outlook and click "
             "'Sign in to Microsoft' again.")
     return result["access_token"]
+
+
+def config_report(settings) -> str:
+    """Human-readable summary of exactly what sign-in will use.
+
+    Printed in the sign-in window so a bad/blank/mistyped client ID is visible
+    immediately instead of being inferred from Microsoft's error pages.
+    """
+    raw = settings.get("outlook.graph_client_id", "")
+    cid = (raw or "").strip()
+    tenant = (settings.get("outlook.graph_tenant", "") or "common").strip() or "common"
+
+    if not cid:
+        state = "EMPTY - nothing was read from settings"
+    elif len(cid) != 36 or cid.count("-") != 4:
+        state = f"SUSPICIOUS - {len(cid)} chars, expected a 36-char GUID: {cid!r}"
+    else:
+        state = f"{cid[:8]}...{cid[-4:]}  (36-char GUID, looks valid)"
+
+    lines = [
+        f"Client ID : {state}",
+        f"Tenant    : {tenant}",
+        f"Authority : {_authority(tenant)}",
+        f"Scopes    : {', '.join(SCOPES)}",
+    ]
+    try:
+        if "outlook.graph_client_id" in settings.unreadable_secrets():
+            lines.append("WARNING   : the stored Client ID cannot be decrypted "
+                         "- re-enter it and Save settings.")
+    except Exception:
+        pass
+    return "\n".join(lines)

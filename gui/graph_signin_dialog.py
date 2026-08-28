@@ -118,6 +118,21 @@ class GraphSignInDialog(ctk.CTkToplevel):
         """Request a device code, then poll for completion off-thread."""
         from integrations.graph_auth import begin_device_login, complete_device_login
 
+        from integrations.graph_auth import config_report
+
+        report = config_report(self._settings)
+        log.info("Graph sign-in config:\n%s", report)
+        if "EMPTY" in report or "SUSPICIOUS" in report:
+            # Sending Microsoft a blank/malformed client_id produces wildly
+            # misleading errors (including a login page that puts the password
+            # in the URL), so stop here with a clear message instead.
+            self._code_lbl.configure(text="-", text_color=C["red"])
+            self._steps.configure(text="Sign-in not started - the Client ID is "
+                                       "missing or malformed.")
+            self._say("CANNOT SIGN IN - fix the Client ID first.\n\n" + report,
+                      C["red"])
+            return
+
         try:
             flow, app, cache = begin_device_login(self._settings)
         except Exception as exc:
@@ -140,8 +155,8 @@ class GraphSignInDialog(ctk.CTkToplevel):
         # message must be the one left on screen.
         self._copy()
         self._open()
-        self._say("Waiting for you to complete sign-in in the browser...",
-                  C["yellow"])
+        self._say("Waiting for you to complete sign-in in the browser...\n\n"
+                  + report, C["yellow"])
 
         # The worker only records the outcome; the Tk thread picks it up by
         # polling. Calling .after() from a worker thread is not reliably
