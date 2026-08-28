@@ -1,8 +1,8 @@
 """ServiceM8 provider - attaches invoices to jobs via the REST API.
 
-Auth: ServiceM8 "Private Application" API key sent as HTTP Basic
-(``<api_key>:x`` base64) or the ``X-Api-Key`` header. We use the API key as
-the basic-auth username which ServiceM8 accepts for private apps.
+Auth: a ServiceM8 "Private Application" API key, sent in the ``X-API-Key``
+header (ServiceM8's documented method for private apps - it is NOT HTTP Basic
+auth; sending Basic auth makes ServiceM8 reply "Invalid username or password").
 
 Flow:
   1. Look up the job by the extracted job number (``generated_job_id`` /
@@ -10,11 +10,10 @@ Flow:
   2. Create an Attachment record linked to that job UUID and upload the file
      bytes to the ``.file`` sub-resource.
 
-Docs: https://developer.servicem8.com/
+Docs: https://developer.servicem8.com/docs/authentication
 """
 from __future__ import annotations
 
-import base64
 import mimetypes
 
 import requests
@@ -31,8 +30,10 @@ class ServiceM8Provider(Provider):
     setting_fields = [("servicem8.api_key", "Private App API Key", True)]
 
     def _headers(self) -> dict:
-        token = base64.b64encode(f"{self._settings.get('servicem8.api_key')}:x".encode()).decode()
-        return {"Authorization": f"Basic {token}", "Accept": "application/json"}
+        return {
+            "X-API-Key": self._settings.get("servicem8.api_key"),
+            "Accept": "application/json",
+        }
 
     def test_connection(self) -> UploadResult:
         try:

@@ -3,6 +3,11 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.10
+- ServiceM8: authenticate with the `X-API-Key` header (the documented method
+  for Private Application keys) instead of HTTP Basic auth. Basic auth made
+  ServiceM8 reply "HTTP 401: Invalid username or password" on Test service.
+
 ## 1.0.9
 - Update dialog: the "What's new" box now word-wraps (it was breaking
   mid-word) and uses bullet points.
