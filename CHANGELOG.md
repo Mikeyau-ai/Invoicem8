@@ -3,6 +3,24 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.14
+- **Microsoft Graph sign-in rebuilt around the device-code flow.** It now
+  needs only an Application (client) ID - no client secret, no tenant ID, no
+  redirect URI. Click "Sign in to Microsoft" in Settings > Outlook, enter the
+  short code at microsoft.com/devicelogin, and that's it. The sign-in is
+  cached (encrypted) and refreshes itself.
+  This matters because the new Outlook for Windows has no COM interface,
+  classic Outlook needs a paid Microsoft 365 subscription, and Microsoft
+  disabled app-password/IMAP access for personal Outlook accounts in
+  September 2024 - Graph OAuth2 is the only remaining option for those users.
+- The COM backend is unchanged and still the default for sites running classic
+  desktop Outlook.
+- Setup guide for the Graph backend rewritten as an exact click-path, and the
+  COM guide now spells out when COM cannot work.
+- Graph errors are reported properly (folder not found, HTTP status) instead
+  of a bare exception, and the scan report notes that the filter requires an
+  attachment.
+
 ## 1.0.13
 - Settings: the action buttons (Save, Test service, Test accounting, Test
   Outlook, Authorise OAuth, Setup guide) and the status box are now pinned in

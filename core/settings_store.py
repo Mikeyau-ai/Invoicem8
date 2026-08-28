@@ -41,6 +41,8 @@ SECRET_KEYS = {
     "outlook.graph_client_secret",
     "outlook.graph_tenant_id",
     "outlook.graph_refresh_token",
+    # MSAL device-code token cache - holds live refresh tokens, so encrypt it.
+    "outlook.graph_token_cache",
     "ai.gemini_api_key",
     "ai.anthropic_api_key",
     "ai.openai_api_key",
@@ -52,6 +54,7 @@ DEFAULTS = {
     "service.provider": "servicem8",      # servicem8 | simpro | aroflo | ... | none
     "accounting.provider": "none",        # xero | myob | qbo | reckon | ... | none
     "outlook.backend": "com",             # com | graph
+    "outlook.graph_tenant": "common",     # common | consumers | <tenant id>
     "outlook.account": "",                # mailbox / UPN to monitor
     "outlook.folder": "Inbox",
     "ai.provider": "gemini",              # openai | gemini | anthropic | openai_compatible

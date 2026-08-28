@@ -155,17 +155,16 @@ FIELD_HELP: dict[str, str] = {
     "outlook.folder":
         "Folder display name to scan. 'Inbox' by default; use the exact name "
         "for a sub-folder or rule target.",
-    "outlook.graph_tenant_id":
-        "Azure Portal > Microsoft Entra ID > Overview > 'Directory (tenant) ID'.",
     "outlook.graph_client_id":
-        "Azure Portal > Entra ID > App registrations > your app > 'Application "
-        "(client) ID'.",
-    "outlook.graph_client_secret":
-        "Same app > Certificates & secrets > New client secret. Copy the "
-        "Value (not the Secret ID) right away.",
-    "outlook.graph_refresh_token":
-        "From the OAuth consent flow. The app > API permissions must include "
-        "Mail.Read with admin consent granted.",
+        "portal.azure.com > Microsoft Entra ID > App registrations > New "
+        "registration. Pick 'Accounts in any organizational directory and "
+        "personal Microsoft accounts'. Copy the 'Application (client) ID' from "
+        "the Overview page. No client secret is needed - sign-in uses the "
+        "device-code flow.",
+    "outlook.graph_tenant":
+        "Leave blank (defaults to 'common', which accepts both personal "
+        "outlook.com and work/school accounts). Only set this to your Directory "
+        "(tenant) ID if you registered the app as single-tenant.",
 
     # -- AI --
     "ai.model":
@@ -315,30 +314,56 @@ SETUP_GUIDES: dict[str, str] = {
         "in your FreshBooks dashboard URL."
     ),
     "outlook_com": (
-        "Outlook - COM backend (recommended for a single PC)\n"
-        "No credentials. The app talks to the Outlook desktop client that is "
-        "already open and signed in on this machine.\n"
+        "Outlook - COM backend (CLASSIC desktop Outlook only)\n"
+        "No credentials. The app automates the classic Outlook desktop client "
+        "already signed in on this PC.\n"
         "- Enter the mailbox address in 'Mailbox / account to monitor' exactly "
-        "as it appears in Outlook (or leave blank for the default account).\n"
-        "- Outlook must be running (or allowed to start) for the watcher to "
-        "read mail.\n"
-        "- 'Folder name' defaults to Inbox; set a sub-folder name if you sort "
-        "invoices with a rule."
+        "as it appears in Outlook (or leave blank for the default account). If "
+        "it doesn't match, Test Outlook lists the accounts it can see.\n"
+        "- Outlook must be running (or allowed to start).\n"
+        "- 'Folder name' defaults to Inbox; set a sub-folder name if a rule "
+        "sorts invoices there.\n\n"
+        "IMPORTANT - when COM will NOT work:\n"
+        "- The NEW Outlook for Windows (the Store app) has no COM automation "
+        "interface at all.\n"
+        "- Classic Outlook requires a paid Microsoft 365 subscription.\n"
+        "- If Test Outlook reports only an 'Outlook Data File' with 0 items, "
+        "your mail is not in a classic profile.\n"
+        "In any of those cases use the 'graph' backend instead."
     ),
     "outlook_graph": (
-        "Outlook - Microsoft Graph backend (no desktop Outlook needed)\n"
-        "1. Azure Portal > Microsoft Entra ID > App registrations > New "
-        "registration. Single tenant is fine.\n"
-        "2. Overview: copy 'Directory (tenant) ID' and 'Application (client) "
-        "ID'.\n"
-        "3. Certificates & secrets > New client secret - copy the Value.\n"
-        "4. API permissions > Add > Microsoft Graph > Mail.Read "
-        "(Delegated for a user mailbox, Application for app-only) > 'Grant "
-        "admin consent'.\n"
-        "5. Authentication > add a redirect URI if using delegated flow.\n"
-        "6. Paste tenant/client/secret here; the refresh token is filled by "
-        "the consent flow.\n"
-        "'Mailbox / account to monitor' = the UPN of the mailbox to read."
+        "Outlook - Microsoft Graph backend (new Outlook, outlook.com, or no "
+        "desktop Outlook at all)\n"
+        "Use this when COM can't work. Microsoft disabled app-password / IMAP "
+        "(Basic auth) for personal Outlook accounts on 16 Sept 2024, so OAuth2 "
+        "is the only supported route - but sign-in here only needs a Client ID.\n\n"
+        "1. Go to portal.azure.com and sign in with the SAME Microsoft account "
+        "whose mail you want to read. (Free - an Azure subscription is not "
+        "required for an app registration.)\n"
+        "2. Microsoft Entra ID > App registrations > New registration.\n"
+        "   - Name: InvoiceM8\n"
+        "   - Supported account types: 'Accounts in any organizational "
+        "directory and personal Microsoft accounts'\n"
+        "   - Redirect URI: leave blank\n"
+        "   - Register.\n"
+        "3. On the Overview page copy the 'Application (client) ID' and paste "
+        "it into the 'Application (client) ID' field here. Leave 'Tenant' "
+        "blank.\n"
+        "4. In the app: Authentication > 'Allow public client flows' = YES > "
+        "Save. (Device-code sign-in fails without this.)\n"
+        "5. In the app: API permissions > Add a permission > Microsoft Graph > "
+        "DELEGATED permissions > Mail.Read > Add. For a personal account no "
+        "admin consent is needed.\n"
+        "6. Back in InvoiceM8: Save settings, then click 'Sign in to "
+        "Microsoft'. A code appears - your browser opens "
+        "microsoft.com/devicelogin; enter the code and sign in.\n"
+        "7. Test Outlook should now report the Graph scan.\n\n"
+        "Notes:\n"
+        "- Leave 'Mailbox / account to monitor' BLANK: Graph reads whichever "
+        "mailbox you signed in as. Only set it to another address if you have "
+        "an organisation tenant with admin-consented access to that mailbox.\n"
+        "- The sign-in is remembered (encrypted locally) and refreshes itself; "
+        "you only sign in once."
     ),
     "openai": (
         "OpenAI (ChatGPT) API key\n"

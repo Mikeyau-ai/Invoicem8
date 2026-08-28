@@ -255,39 +255,34 @@ class ComBackend(OutlookBackend):
 # Microsoft Graph backend
 # --------------------------------------------------------------------------
 class GraphBackend(OutlookBackend):
-    """Cloud mailbox access via Graph. Requires a stored refresh token."""
+    """Cloud mailbox access via Graph, authenticated by device-code sign-in.
+
+    This is the backend to use with the NEW Outlook for Windows and with
+    outlook.com personal accounts - neither supports COM automation, and
+    Microsoft disabled IMAP/app-password (Basic) auth for personal mailboxes
+    on 2024-09-16, so OAuth2 is the only remaining option.
+    """
 
     GRAPH = "https://graph.microsoft.com/v1.0"
-    SCOPES = ["https://graph.microsoft.com/Mail.Read"]
 
-    def __init__(self, tenant_id: str, client_id: str, client_secret: str,
-                 refresh_token: str, account: str, folder: str = "Inbox") -> None:
-        self._tenant = tenant_id
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._refresh_token = refresh_token
-        self._account = account
-        self._folder = folder or "Inbox"
+    def __init__(self, settings, account: str = "", folder: str = "Inbox") -> None:
+        self._settings = settings
+        self._account = (account or "").strip()
+        self._folder = (folder or "").strip() or "Inbox"
         self.last_scan = ""
 
     def _token(self) -> str:
-        """Exchange the stored refresh token for an access token."""
-        import msal
+        """Access token from the cached device-code sign-in."""
+        from integrations.graph_auth import access_token
 
-        app = msal.ConfidentialClientApplication(
-            self._client_id,
-            authority=f"https://login.microsoftonline.com/{self._tenant}",
-            client_credential=self._client_secret,
-        )
-        result = app.acquire_token_by_refresh_token(self._refresh_token, scopes=self.SCOPES)
-        if "access_token" not in result:
-            raise RuntimeError(f"Graph auth failed: {result.get('error_description')}")
-        return result["access_token"]
+        return access_token(self._settings)
 
     def fetch(self, since, unread_only, allowed_ext):
         import requests
 
         headers = {"Authorization": f"Bearer {self._token()}"}
+        # /me is the signed-in mailbox. A different address only works with an
+        # org tenant plus admin consent, so only use it when explicitly set.
         base = f"{self.GRAPH}/users/{self._account}" if self._account else f"{self.GRAPH}/me"
         params = {
             "$top": "50",
@@ -303,7 +298,12 @@ class GraphBackend(OutlookBackend):
 
         url = f"{base}/mailFolders/{self._folder}/messages"
         resp = requests.get(url, headers=headers, params=params, timeout=30)
-        resp.raise_for_status()
+        if resp.status_code == 404:
+            raise RuntimeError(
+                f"Graph could not find folder '{self._folder}'. Use a well-known "
+                "name like Inbox, or the exact display name of a sub-folder.")
+        if not resp.ok:
+            raise RuntimeError(f"Graph error {resp.status_code}: {resp.text[:300]}")
 
         value = resp.json().get("value", [])
         results: list[EmailMessage] = []
@@ -323,11 +323,15 @@ class GraphBackend(OutlookBackend):
                 attachments=saved,
                 is_unread=not msg.get("isRead", True),
             ))
+        who = self._account or "the signed-in mailbox"
         self.last_scan = (
-            f"Graph folder '{self._folder}' for "
-            f"{self._account or 'the signed-in mailbox'}: filter [{params['$filter']}] "
-            f"matched {len(value)} messages, {len(results)} with a usable attachment."
+            f"Graph: folder '{self._folder}' of {who}. "
+            f"{len(value)} message(s) matched [{params['$filter']}]; "
+            f"{len(results)} had a usable attachment and are queued."
         )
+        if not value:
+            self.last_scan += (" Nothing matched - the filter requires an "
+                               "ATTACHMENT, so plain emails are ignored.")
         return results
 
     def _download_attachments(self, base, msg_id, headers, allowed_ext, requests):
@@ -354,17 +358,14 @@ class GraphBackend(OutlookBackend):
 
 
 def build_backend(settings) -> OutlookBackend:
-    """Factory that returns the backend selected in Settings."""
-    backend = settings.get("outlook.backend", "com")
+    """Factory that returns the backend selected in Settings.
+
+    Both backends stay available: COM suits sites running classic desktop
+    Outlook, Graph suits the new Outlook / outlook.com / anywhere COM is not
+    an option.
+    """
     account = settings.get("outlook.account", "")
     folder = settings.get("outlook.folder", "Inbox")
-    if backend == "graph":
-        return GraphBackend(
-            tenant_id=settings.get("outlook.graph_tenant_id"),
-            client_id=settings.get("outlook.graph_client_id"),
-            client_secret=settings.get("outlook.graph_client_secret"),
-            refresh_token=settings.get("outlook.graph_refresh_token"),
-            account=account,
-            folder=folder,
-        )
+    if settings.get("outlook.backend", "com") == "graph":
+        return GraphBackend(settings, account=account, folder=folder)
     return ComBackend(account=account, folder=folder)

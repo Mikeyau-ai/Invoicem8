@@ -32,11 +32,11 @@ OUTLOOK_COMMON = [
 ]
 OUTLOOK_BY_BACKEND = {
     "com": [],  # COM uses the signed-in desktop Outlook - no credentials
+    # Device-code sign-in needs only the Client ID; the tenant defaults to
+    # "common" which covers personal outlook.com and work/school accounts.
     "graph": [
-        ("outlook.graph_tenant_id", "Graph Tenant ID", True),
-        ("outlook.graph_client_id", "Graph Client ID", True),
-        ("outlook.graph_client_secret", "Graph Client Secret", True),
-        ("outlook.graph_refresh_token", "Graph Refresh Token", True),
+        ("outlook.graph_client_id", "Application (client) ID", True),
+        ("outlook.graph_tenant", "Tenant (blank = common)", False),
     ],
 }
 
@@ -230,6 +230,65 @@ class SettingsTab:
                 return k
         return "gemini"
 
+    def _build_graph_signin(self) -> None:
+        """Sign-in row for the Graph backend: status + sign in / sign out."""
+        from integrations.graph_auth import signed_in_account
+
+        who = signed_in_account(self._settings)
+        row = ctk.CTkFrame(self._outlook_box, fg_color=C["bg"])
+        row.pack(fill="x", padx=6, pady=(8, 2))
+        ctk.CTkLabel(row, text="Microsoft sign-in", font=FONT_UI,
+                     text_color=C["text"], width=250, anchor="w").pack(side="left")
+        accent_button(ctk, row, "Sign in to Microsoft", self._graph_sign_in,
+                      colour=C["purple"]).pack(side="left")
+        if who:
+            accent_button(ctk, row, "Sign out", self._graph_sign_out,
+                          colour=C["btn_off"]).pack(side="left", padx=8)
+        self._note(self._outlook_box,
+                   f"Signed in as {who}." if who else
+                   "Not signed in. Save the Client ID first, then click "
+                   "'Sign in to Microsoft' - you'll get a short code to enter at "
+                   "microsoft.com/devicelogin. Needed because Microsoft turned off "
+                   "app-password/IMAP access for personal accounts in Sept 2024.")
+
+    def _graph_sign_in(self) -> None:
+        """Run the device-code flow, showing the code while we wait."""
+        import threading
+        from integrations.graph_auth import begin_device_login, complete_device_login
+
+        self._save()
+        try:
+            flow, app, cache = begin_device_login(self._settings)
+        except Exception as exc:
+            self._status.configure(text=str(exc), text_color=C["red"])
+            return
+
+        self._status.configure(text=flow.get("message", "Follow the sign-in prompt."),
+                               text_color=C["yellow"])
+        try:                                    # convenience: open the page
+            import webbrowser
+            webbrowser.open(flow.get("verification_uri", "https://microsoft.com/devicelogin"))
+        except Exception:
+            pass
+
+        def work() -> None:
+            try:
+                who = complete_device_login(self._settings, flow, app, cache)
+                msg, colour = f"Signed in to Microsoft as {who}.", C["green"]
+            except Exception as exc:
+                msg, colour = str(exc), C["red"]
+            self._app.after(0, lambda: (self._status.configure(text=msg, text_color=colour),
+                                        self._render()))
+
+        threading.Thread(target=work, daemon=True, name="graph-signin").start()
+
+    def _graph_sign_out(self) -> None:
+        from integrations.graph_auth import sign_out
+
+        sign_out(self._settings)
+        self._render()
+        self._status.configure(text="Signed out of Microsoft.", text_color=C["dim"])
+
     def _on_backend_change(self) -> None:
         """Remember the Outlook backend choice, then re-render."""
         self._ob_value = self._outlook_backend.get()
@@ -280,10 +339,14 @@ class SettingsTab:
         backend = self._outlook_backend.get()
         if backend == "com":
             self._note(self._outlook_box,
-                       "COM backend reads the Outlook desktop client you are already "
-                       "signed into - no extra credentials needed.")
+                       "COM reads the CLASSIC Outlook desktop client you are already "
+                       "signed into - no credentials needed. It does NOT work with "
+                       "the new Outlook for Windows (no COM support): use 'graph' "
+                       "for that, and for outlook.com accounts.")
         for key, lbl, secret in OUTLOOK_BY_BACKEND.get(backend, []):
             self._row(self._outlook_box, key, lbl, secret)
+        if backend == "graph":
+            self._build_graph_signin()
 
         # --- AI ---
         akey = self._ai_key()
