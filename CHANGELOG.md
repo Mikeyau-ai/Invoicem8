@@ -3,6 +3,17 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.20
+- Graph setup guide now includes the step that was missing: personal Microsoft
+  accounts require a redirect URI registered under Authentication > Add a
+  platform > "Mobile and desktop applications" >
+  https://login.microsoftonline.com/common/oauth2/nativeclient. Without it,
+  device-code sign-in fails with "invalid_request: The provided request must
+  include a 'redirect_uri' input parameter", even though device-code flow
+  normally needs no redirect URI.
+- The sign-in error message now detects that exact failure and tells you the
+  fix instead of just echoing Microsoft's wording.
+
 ## 1.0.19
 - Fixed Microsoft sign-in failing with "invalid_request: The provided request
   must include a 'redirect_uri' input parameter". The app was opening MSAL's

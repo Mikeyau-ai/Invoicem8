@@ -3,8 +3,10 @@
 Why device code: Outlook.com personal mailboxes dropped Basic Authentication
 on 2024-09-16, so IMAP/app passwords no longer work and Graph OAuth2 is the
 only route. The device-code flow needs only a **Client ID** - no client
-secret, no tenant, no redirect URI - which keeps setup to one Azure field for
-a personal account.
+secret and no tenant. The app registration does need 'Allow public client
+flows' = Yes and a 'Mobile and desktop applications' redirect URI of
+https://login.microsoftonline.com/common/oauth2/nativeclient: personal
+Microsoft accounts reject the flow without one.
 
 The MSAL token cache is persisted (encrypted) in the settings table, so the
 user signs in once and the watcher refreshes silently from then on.
@@ -92,8 +94,12 @@ def begin_device_login(settings) -> tuple[dict, object, object]:
         raise RuntimeError(
             "Could not start Microsoft sign-in: "
             f"{flow.get('error_description') or flow}. Check the Client ID, and "
-            "make sure the app registration has 'Allow public client flows' "
-            "enabled under Authentication."
+            "that the app registration has BOTH: 'Allow public client flows' = "
+            "Yes, and a 'Mobile and desktop applications' platform with the "
+            "redirect URI "
+            "https://login.microsoftonline.com/common/oauth2/nativeclient "
+            "(personal Microsoft accounts require that redirect URI even for "
+            "device-code sign-in)."
         )
     return flow, app, cache
 
@@ -102,8 +108,17 @@ def complete_device_login(settings, flow, app, cache) -> str:
     """Block until the user completes sign-in. Returns their username."""
     result = app.acquire_token_by_device_flow(flow)
     if "access_token" not in result:
-        raise RuntimeError(
-            f"Microsoft sign-in failed: {result.get('error_description') or result}")
+        detail = result.get("error_description") or result
+        hint = ""
+        if "redirect_uri" in str(detail):
+            hint = (
+                "  FIX: in the app registration go to Authentication > "
+                "Add a platform > 'Mobile and desktop applications' and "
+                "tick https://login.microsoftonline.com/common/oauth2/"
+                "nativeclient, then Configure. Personal Microsoft accounts "
+                "need that redirect URI registered even for device-code "
+                "sign-in.")
+        raise RuntimeError(f"Microsoft sign-in failed: {detail}{hint}")
     _save_cache(settings, cache)
     return (result.get("id_token_claims") or {}).get("preferred_username", "signed in")
 
