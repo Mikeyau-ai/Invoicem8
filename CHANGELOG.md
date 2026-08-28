@@ -3,6 +3,18 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.12
+- Settings status line now word-wraps and grows with the window, so long
+  diagnostics (Test Outlook, connection errors) are fully readable instead of
+  being cut off at the edge.
+- Mailbox matching is much less brittle: the configured address is matched
+  against account SMTP addresses, account display names and data-file names.
+  When it still doesn't match, the message now LISTS the accounts Outlook
+  actually has on that PC so you can paste the right one in.
+- Scan report now includes how many items the folder holds in total, and says
+  outright when the folder is empty or has nothing recent - which usually
+  means the wrong mailbox is selected.
+
 ## 1.0.11
 - Outlook COM: if `Outlook.Application` can't be reached (which is always the
   case with the NEW Outlook for Windows Store app - it has no COM interface)

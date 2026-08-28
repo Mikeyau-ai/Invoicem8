@@ -129,8 +129,15 @@ class SettingsTab:
         accent_button(ctk, bar, "Test Outlook", self._test_outlook, colour=C["blue"]).pack(side="left", padx=8)
         accent_button(ctk, bar, "Authorise OAuth", self._oauth, colour=C["purple"]).pack(side="left", padx=(8, 0))
         accent_button(ctk, bar, "Setup guide (all)", self._open_full_guide, colour=C["btn_off"]).pack(side="left", padx=8)
-        self._status = ctk.CTkLabel(self.frame, text="", font=FONT_UI, text_color=C["dim"])
-        self._status.pack(anchor="w", padx=6)
+        # Status can be a long multi-line diagnostic (Test Outlook reports what
+        # it scanned), so wrap it and let it grow instead of clipping.
+        self._status = ctk.CTkLabel(self.frame, text="", font=FONT_UI,
+                                    text_color=C["dim"], anchor="w",
+                                    justify="left", wraplength=700)
+        self._status.pack(anchor="w", fill="x", padx=6, pady=(0, 12))
+        self.frame.bind(
+            "<Configure>",
+            lambda e: self._status.configure(wraplength=max(360, e.width - 40)))
 
     # -- widget helpers ----------------------------------------
     def _header(self, parent, text: str, guide_key: str | None = None) -> None:

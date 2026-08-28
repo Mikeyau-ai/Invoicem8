@@ -87,24 +87,50 @@ class ComBackend(OutlookBackend):
         note = ""
 
         if self._account:
-            # Prefer an exact SMTP-address match on a configured account.
+            want = self._account.lower()
+            seen: list[str] = []
+
+            # 1. Exact SMTP-address match on a configured account.
             try:
                 for acct in ns.Accounts:
-                    if (getattr(acct, "SmtpAddress", "") or "").lower() == self._account.lower():
-                        store = acct.DeliveryStore
-                        root = store.GetRootFolder()
+                    smtp = (getattr(acct, "SmtpAddress", "") or "").strip()
+                    if smtp:
+                        seen.append(smtp)
+                    if smtp.lower() == want:
+                        root = acct.DeliveryStore.GetRootFolder()
                         f = self._find_folder(root, self._folder) or root.Folders["Inbox"]
-                        return f, f"account '{acct.SmtpAddress}', folder '{f.Name}'"
+                        return f, f"account '{smtp}', folder '{f.Name}'"
             except Exception:
                 pass
-            # Fall back to a display-name substring match on the stores.
+
+            # 2. Substring match on account SMTP / display name (handles
+            #    aliases and "Name <addr>" style entries).
+            try:
+                for acct in ns.Accounts:
+                    hay = f"{getattr(acct, 'SmtpAddress', '')} {getattr(acct, 'DisplayName', '')}".lower()
+                    if want in hay or want.split("@")[0] in hay:
+                        root = acct.DeliveryStore.GetRootFolder()
+                        f = self._find_folder(root, self._folder) or root.Folders["Inbox"]
+                        return f, f"account '{getattr(acct, 'DisplayName', '?')}', folder '{f.Name}'"
+            except Exception:
+                pass
+
+            # 3. Substring match on store display names.
             for store in ns.Stores:
-                dn = store.DisplayName or ""
-                if self._account.lower() in dn.lower():
+                dn = (store.DisplayName or "").strip()
+                if dn:
+                    seen.append(dn)
+                if want in dn.lower() or want.split("@")[0] in dn.lower():
                     root = store.GetRootFolder()
                     f = self._find_folder(root, self._folder) or root.Folders["Inbox"]
                     return f, f"store '{dn}', folder '{f.Name}'"
-            note = f"account '{self._account}' not matched to an Outlook account; using default. "
+
+            available = ", ".join(dict.fromkeys(seen)) or "(none found)"
+            note = (f"'{self._account}' did not match any Outlook account or data "
+                    f"file, so the DEFAULT mailbox was used instead. Outlook on "
+                    f"this PC offers: {available}. Put one of those in "
+                    f"'Mailbox / account to monitor', or leave it blank to use "
+                    f"the default. ")
 
         inbox = ns.GetDefaultFolder(6)  # 6 = olFolderInbox
         if self._folder.lower() != "inbox":
@@ -112,7 +138,11 @@ class ComBackend(OutlookBackend):
             if found:
                 return found, note + f"default account, folder '{found.Name}'"
             note += f"folder '{self._folder}' not found; using Inbox. "
-        return inbox, note + "default account, Inbox"
+        try:
+            owner = inbox.Store.DisplayName
+        except Exception:
+            owner = "default"
+        return inbox, note + f"Scanned '{owner}' Inbox"
 
     @staticmethod
     def _find_folder(root, name: str):
@@ -137,6 +167,10 @@ class ComBackend(OutlookBackend):
                           - timedelta(days=FIRST_SCAN_LOOKBACK_DAYS))
 
         items = inbox.Items
+        try:
+            total_in_folder = items.Count
+        except Exception:
+            total_in_folder = -1
         try:
             items.Sort("[ReceivedTime]", True)   # newest first
         except Exception:
@@ -198,13 +232,22 @@ class ComBackend(OutlookBackend):
             except Exception as exc:  # keep scanning other mail
                 log.exception("COM item read failed: %s", exc)
 
+        in_window = checked - older
         self.last_scan = (
-            f"Scanned {where}. {checked} emails in window, "
-            f"{read_skip} skipped as already-read (unread-only is "
-            f"{'ON' if unread_only else 'off'}), "
-            f"{no_attach} with no matching attachment, "
+            f"{where}. Folder holds {total_in_folder} item(s); "
+            f"{in_window} within the last "
+            f"{FIRST_SCAN_LOOKBACK_DAYS} days (or since the last check); "
+            f"{read_skip} skipped as already-read "
+            f"(unread-only is {'ON' if unread_only else 'off'}); "
+            f"{no_attach} had no usable attachment; "
             f"{len(results)} queued for processing."
         )
+        if total_in_folder == 0:
+            self.last_scan += (" That folder is EMPTY - it is probably not the "
+                               "mailbox your test email arrived in.")
+        elif in_window == 0 and total_in_folder > 0:
+            self.last_scan += (" Nothing recent enough - check you are pointed "
+                               "at the right mailbox/folder.")
         return results
 
 
