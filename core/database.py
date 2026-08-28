@@ -502,6 +502,19 @@ class Database:
         )
         return int(cur.lastrowid)
 
+    def repair_pending_status(self) -> int:
+        """Heal rows written before add_pending() defaulted the status.
+
+        Those were inserted with an empty status and so were invisible to
+        list_pending(), leaving the invoice queued forever. Returns how many
+        were repaired.
+        """
+        rows = self._query("SELECT id FROM pending_invoices WHERE status=''")
+        if rows:
+            self._exec("UPDATE pending_invoices SET status='pending_new_customer' "
+                       "WHERE status=''")
+        return len(rows)
+
     def list_pending(self, status: str = "pending_new_customer") -> list[sqlite3.Row]:
         """Queued invoices in one status, newest first."""
         return self._query(

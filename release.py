@@ -51,8 +51,23 @@ def changelog(version: str) -> str:
     return body or f"- Release {version}. See CHANGELOG.md for details."
 
 
+def run_tests() -> bool:
+    """Run the unit suite; a failing build must never be published."""
+    print("  Running tests...")
+    result = subprocess.run([sys.executable, "-m", "unittest", "discover",
+                             "-s", "tests"], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(result.stdout[-2000:] or result.stderr[-2000:])
+        return False
+    print("  Tests passed.")
+    return True
+
+
 def main() -> int:
     """Publish the built exe as a GitHub release. Returns a shell exit code."""
+    if not run_tests():
+        print("  TESTS FAILED - not releasing.")
+        return 1
     if not EXE.exists():
         print(f"  {EXE} not found - build first (build.bat / PyInstaller).")
         return 1

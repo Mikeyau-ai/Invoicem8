@@ -3,6 +3,23 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.37
+- Added a test suite (`run_tests.bat`, or `python -m unittest discover -s
+  tests`). 28 tests, standard library only, no dependency to install. It
+  covers the parts that fail silently: document classification, credit
+  detection, reference extraction, supplier identification, the duplicate
+  guard, credit-to-job linking and the routing gates. `release.py` now refuses
+  to publish if they fail.
+- Writing it immediately found two real bugs:
+  - **Held invoices were invisible.** An invoice held for low confidence went
+    only to the pending queue, but the Error Log - the one screen with a Retry
+    button - reads the error log, so it could never be actioned despite the
+    message saying to retry there. Held invoices are now recorded there too.
+  - **`repair_pending_status` had been lost** in an earlier refactor while
+    still being called, so replaying queued invoices raised AttributeError.
+  - Retrying also dropped `doc_type` and the reference candidates, so a
+    retried credit note would have been re-filed as an invoice.
+
 ## 1.0.36
 - **Not every attachment is an invoice.** Documents are now classified before
   anything is filed: statements of account, quotes, remittance advices and

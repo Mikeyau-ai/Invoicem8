@@ -120,6 +120,25 @@ class Router:
                            action="queued", filename=path.name,
                            message=f"{why} - add the supplier in the Suppliers "
                                    f"tab, then retry from the Error Log.")
+                # Also record it as an error: the Error Log is the only screen
+                # with a Retry button, so a held invoice that only lived in
+                # pending_invoices was invisible and could never be actioned.
+                self._db.add_error(
+                    stage="supplier", customer_name=read,
+                    invoice_ref=parsed.invoice_ref, filename=path.name,
+                    error=f"{why}. Add the supplier, then Retry.",
+                    payload=json.dumps({
+                        "customer_name": read,
+                        "job_number": parsed.job_number,
+                        "invoice_ref": parsed.invoice_ref,
+                        "amount_total": parsed.amount_total,
+                        "invoice_date": parsed.invoice_date,
+                        "doc_type": parsed.doc_type,
+                        "job_candidates": list(parsed.job_candidates or []),
+                        "file_path": str(path),
+                        "email_subject": subject,
+                        "platform": "-",
+                    }))
             return "pending_new_customer"
 
         allowed = set(customer["file_types"].split(","))
@@ -344,6 +363,11 @@ class Router:
             invoice_ref=data.get("invoice_ref", ""),
             amount_total=data.get("amount_total", ""),
             invoice_date=data.get("invoice_date", ""),
+            # Without these a retried credit note would be re-filed as an
+            # invoice, and would lose the references used to find its job.
+            doc_type=data.get("doc_type", "invoice"),
+            job_candidates=list(data.get("job_candidates") or []),
+            confidence=1.0,   # a human is retrying: do not re-gate on doubt
         )
         path = Path(data["file_path"])
         if not path.exists():
