@@ -3,6 +3,15 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.21
+- Microsoft sign-in now opens its own window instead of reporting through the
+  Settings status box: the code is shown in large text with Copy and Open
+  buttons, and the real outcome (SUCCESS with the account name, or FAILED with
+  Microsoft's exact error) appears in a selectable box you can copy from.
+- The window states plainly that the browser finishing on Microsoft's "This is
+  not the right page" is that page's normal behaviour, and that this window -
+  not the browser - shows whether sign-in actually worked.
+
 ## 1.0.20
 - Graph setup guide now includes the step that was missing: personal Microsoft
   accounts require a redirect URI registered under Authentication > Add a
