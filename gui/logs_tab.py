@@ -27,7 +27,7 @@ class LogsTab:
         bar.pack(fill="x", pady=(0, 6))
         ctk.CTkLabel(bar, text="Activity Log", font=FONT_HEAD,
                      text_color=C["blue"]).pack(side="left", padx=6)
-        self._search = ctk.CTkEntry(bar, width=280, placeholder_text="Search customer / ref / platform / text")
+        self._search = ctk.CTkEntry(bar, width=280, placeholder_text="Search supplier / ref / platform / text")
         self._search.pack(side="left", padx=6)
         self._search.bind("<Return>", lambda _e: self.refresh())
         self._search.bind("<Escape>", lambda _e: self._clear_filter())

@@ -178,7 +178,8 @@ class Watcher:
             self._emit(level="INFO", customer_name="", platform="-", action="found",
                        message=f"Processing '{msg.subject}' from {msg.sender}")
             try:
-                parsed = self._parser.parse(msg.subject, msg.body, msg.attachments)
+                parsed = self._parser.parse(msg.subject, msg.body, msg.attachments,
+                                            sender=msg.sender)
                 self._emit(level="INFO", customer_name=parsed.customer_name,
                            invoice_ref=parsed.invoice_ref, platform="-", action="parsed",
                            message=f"job={parsed.job_number or '-'} "

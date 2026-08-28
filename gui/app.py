@@ -118,9 +118,9 @@ class App(ctk.CTk):
 
         self.tabs = ctk.CTkTabview(self._glow, fg_color=C["panel"])
         self.tabs.pack(fill="both", expand=True, padx=3, pady=3)
-        for name in ("Customers", "Activity Log", "Error Log"):
+        for name in ("Suppliers", "Activity Log", "Error Log"):
             self.tabs.add(name)
-        self.customers_tab = CustomersTab(self.tabs.tab("Customers"), self)
+        self.customers_tab = CustomersTab(self.tabs.tab("Suppliers"), self)
         self.logs_tab = LogsTab(self.tabs.tab("Activity Log"), self)
         self.errors_tab = ErrorsTab(self.tabs.tab("Error Log"), self)
         self.settings_tab: SettingsTab | None = None  # created on first open

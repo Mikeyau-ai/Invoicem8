@@ -3,6 +3,20 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.35
+- **Fixed the wrong party being extracted.** InvoiceM8 files invoices a
+  business RECEIVES from its suppliers, but the parser was asking for the
+  "customer / bill-to" company - which on an incoming invoice is your own
+  business. It now extracts the SUPPLIER: the company on the letterhead, in
+  the From details, or whose bank/ABN is given for payment, explicitly
+  ignoring the Bill To party.
+- The sending email address is now used as a supplier hint (an invoice from
+  accounts@acmeplumbing.com.au is from Acme Plumbing), with generic mail hosts
+  ignored, and the document letterhead is used as a further fallback.
+- Renamed "Customers" to **Suppliers** throughout the interface, which is what
+  they actually are. Database column names are unchanged - a schema rename
+  would be risk without benefit - and the code notes why.
+
 ## 1.0.34
 Job matching is the part that has to be right, so it no longer rests on a
 single guess.

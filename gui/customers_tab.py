@@ -32,11 +32,11 @@ class CustomersTab:
         left.pack_propagate(False)
         head = ctk.CTkFrame(left, fg_color=C["panel"])
         head.pack(fill="x", padx=10, pady=8)
-        ctk.CTkLabel(head, text="Customers", font=FONT_HEAD,
+        ctk.CTkLabel(head, text="Suppliers", font=FONT_HEAD,
                      text_color=C["blue"]).pack(side="left")
         accent_button(ctk, head, "?", self._guide, colour=C["btn_off"],
                       width=28, height=24).pack(side="right")
-        accent_button(ctk, left, "+ New customer", self._new,
+        accent_button(ctk, left, "+ New supplier", self._new,
                       colour=C["green"]).pack(fill="x", padx=10, pady=(0, 6))
         # Suppliers are added automatically, so the list needs ordering and a
         # way to see just the ones nobody has looked at yet.
@@ -116,10 +116,10 @@ class CustomersTab:
     def _build_form(self) -> None:
         """Lay out the customer profile fields, toggles and buttons."""
         f = self._form
-        ctk.CTkLabel(f, text="Customer profile", font=FONT_HEAD,
+        ctk.CTkLabel(f, text="Supplier profile", font=FONT_HEAD,
                      text_color=C["blue"]).pack(anchor="w", padx=6, pady=(8, 6))
 
-        self._name = self._entry(f, "Name")
+        self._name = self._entry(f, "Supplier name")
         self._aliases = self._entry(f, "Aliases (comma separated)")
         self._sm8_uuid = self._entry(f, "ServiceM8 client UUID (optional)")
         self._acct_id = self._entry(f, "Accounting contact / supplier ID (optional)")
@@ -171,7 +171,7 @@ class CustomersTab:
         self._sm8.deselect(); self._acct.deselect()
         for ext, cb in self._type_vars.items():
             cb.select() if ext == "pdf" else cb.deselect()
-        self._status.configure(text="New customer - fill in and Save.", text_color=C["dim"])
+        self._status.configure(text="New supplier - fill in and Save.", text_color=C["dim"])
 
     def _load(self, cid: int) -> None:
         """Populate the form from one stored customer profile."""
@@ -231,7 +231,7 @@ class CustomersTab:
         self._db.delete_customer(self._current_id)
         self._new()
         self.refresh()
-        self._status.configure(text="Customer deleted.", text_color=C["yellow"])
+        self._status.configure(text="Supplier deleted.", text_color=C["yellow"])
 
     # -- used by the new-customer modal --------------------------
     def add_from_dialog(self, data: dict) -> int:

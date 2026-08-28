@@ -27,9 +27,15 @@ import requests
 
 log = logging.getLogger(__name__)
 
-_PROMPT = """You extract structured data from contractor/supplier invoices.
+_PROMPT = """You extract structured data from invoices a business has RECEIVED from its
+suppliers (accounts payable), so it can file them against the right job.
 Return ONLY minified JSON with these keys:
-  customer_name  - the CUSTOMER / client / bill-to company the invoice is for
+  customer_name  - the SUPPLIER: the business that ISSUED this invoice and is
+                   owed the money. This is an INCOMING invoice, so it is the
+                   company on the letterhead / in the "From" details / whose
+                   bank or ABN is given for payment. Do NOT return the "Bill
+                   To" / "To" / "Deliver To" party - that is the recipient
+                   reading this, not the supplier.
   job_number     - job / work order number if present, else ""
   invoice_ref    - the invoice / credit note number, else ""
   amount_total   - total incl. tax as a number string, else ""
@@ -66,6 +72,8 @@ like "Customer10160.pdf", "INV-1042_Customer.pdf" or "10160 Testco.pdf" - a
 run of letters is usually the customer and a run of 3+ digits is usually the
 job number or invoice number. Use them when the text is sparse or scanned.
 
+--- EMAIL FROM (usually the supplier's own domain) ---
+{sender}
 --- EMAIL SUBJECT ---
 {subject}
 --- ATTACHMENT FILE NAMES ---
@@ -385,8 +393,43 @@ def _reference_candidates(blob: str, filenames: str, *first) -> list[str]:
     return out[:12]                          # bounded: each costs a lookup
 
 
+def _supplier_from_sender(sender: str) -> str:
+    """Best-guess supplier name from the sending email address.
+
+    An incoming invoice almost always arrives from the supplier's own domain,
+    which is a far better signal than anything labelled on the page.
+    """
+    match = re.search(r"@([A-Za-z0-9.-]+)", sender or "")
+    if not match:
+        return ""
+    host = match.group(1).lower()
+    # Drop the public suffix and any generic mail host.
+    parts = [p for p in host.split(".")
+             if p not in {"com", "net", "org", "au", "nz", "co", "uk", "www"}]
+    name = parts[0] if parts else ""
+    if name in {"gmail", "outlook", "hotmail", "yahoo", "bigpond", "live",
+                "icloud", "me", "msn", "optusnet", "iinet"}:
+        return ""            # a personal mailbox tells us nothing
+    return name
+
+
+def _letterhead(attachment: str) -> str:
+    """First substantial line of the document - usually the supplier name."""
+    for line in (attachment or "").splitlines():
+        line = line.strip(" 	|-")
+        if len(line) < 3 or len(line) > 60:
+            continue
+        if not any(c.isalpha() for c in line):
+            continue
+        if re.search(r"tax\s*invoice|invoice|statement|credit\s*note|abn|acn",
+                     line, re.I):
+            continue
+        return line
+    return ""
+
+
 def _regex_fallback(subject: str, body: str, attachment: str,
-                    filenames: str = "") -> ParseResult:
+                    filenames: str = "", sender: str = "") -> ParseResult:
     """Cheap heuristic extraction when AI is unavailable."""
     blob = f"{subject}\n{body}\n{attachment}\n{filenames}"
     # \b anchors stop "Invoice" itself being consumed as "inv" + "oice", and
@@ -435,12 +478,17 @@ def _regex_fallback(subject: str, body: str, attachment: str,
 
     job_number = _find_labelled(_JOB_LABELS)
     invoice_ref = _find_labelled(_INV_LABELS)
-    cust = re.search(r"(?:bill\s*to|customer|client|to)\s*[:\-]\s*(.+)", blob, re.I)
+    # Deliberately NOT "bill to"/"to": on an incoming invoice that party is us.
+    cust = re.search(r"(?:from|supplier|vendor|issued\s*by|remit\s*to|pay\s*to)"
+                     r"\s*[:\-]\s*(.+)", blob, re.I)
     is_credit = _looks_like_credit(blob)
 
     fn_name, fn_num = _from_filename(filenames)
     candidates = _reference_candidates(blob, filenames, job_number, invoice_ref, fn_num)
-    customer = (cust.group(1).splitlines()[0].strip() if cust else "") or fn_name
+    customer = ((cust.group(1).splitlines()[0].strip() if cust else "")
+                or _supplier_from_sender(sender)
+                or _letterhead(attachment)
+                or fn_name)
     job_number = job_number or fn_num
     return ParseResult(
         customer_name=customer,
@@ -530,7 +578,8 @@ class InvoiceParser:
         """Bind the parser to the settings store holding the AI config."""
         self._settings = settings
 
-    def parse(self, subject: str, body: str, attachments: list[Path]) -> ParseResult:
+    def parse(self, subject: str, body: str, attachments: list[Path],
+              sender: str = "") -> ParseResult:
         """Run extraction over one email + its attachments."""
         # Only bother extracting from formats the extractor actually handles -
         # images and unknown types always come back empty.
@@ -543,7 +592,8 @@ class InvoiceParser:
         # Local / compatible servers may not need a key; everyone else does.
         if key or not meta["needs_key"]:
             prompt = _PROMPT.format(subject=subject, body=body[:6000],
-                                    attachment=attachment_text, filenames=filenames)
+                                    attachment=attachment_text,
+                                    filenames=filenames, sender=sender)
             try:
                 raw = _call_provider(provider, key, model, prompt, base_url)
                 data = _coerce_json(raw)
@@ -565,4 +615,4 @@ class InvoiceParser:
             except Exception as exc:
                 log.error("AI parse failed (%s); using regex fallback: %s", provider, exc)
 
-        return _regex_fallback(subject, body, attachment_text, filenames)
+        return _regex_fallback(subject, body, attachment_text, filenames, sender)

@@ -426,14 +426,14 @@ SETUP_GUIDES: dict[str, str] = {
         "first' (the default).\n"
         "- 'Show new only' hides everything you have already checked.\n"
         "- The counter under the controls shows how many are still new.\n"
-        "- Opening a customer, checking the toggles and clicking Save clears "
+        "- Opening a supplier, checking the toggles and clicking Save clears "
         "the NEW badge. That is all 'reviewing' means.\n\n"
-        "Matching: an invoice matches on the customer name or any of its "
+        "Matching: an invoice matches on the supplier name or any of its "
         "Aliases, so add the supplier's other trading names there and future "
         "invoices match without creating a duplicate.\n\n"
-        "If no customer name can be read at all, the invoice is held instead "
+        "If no supplier name can be read at all, the invoice is held instead "
         "of guessed - it appears in the Error Log so it can be retried once "
-        "the customer exists."
+        "the supplier exists."
     ),
     "email_accounts": (
         "Email accounts - monitoring more than one mailbox\n"
