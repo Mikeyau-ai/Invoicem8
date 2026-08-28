@@ -3,6 +3,14 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.18
+- Graph guide: the "no directory" step now covers the exact wording the portal
+  shows ("The ability to create applications outside of a directory has been
+  deprecated") and warns that the M365 Developer Program route it offers needs
+  a PAID Visual Studio Professional/Enterprise subscription, leaving the free
+  Azure account as the practical option. Also notes that business Microsoft
+  365 accounts already have a directory, so customer sites skip this entirely.
+
 ## 1.0.17
 - Graph setup guide rewritten against the CURRENT portal: sign-in is at
   entra.microsoft.com (not portal.azure.com), and the account-type option is
