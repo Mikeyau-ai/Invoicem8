@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS processed_documents (
     doc_type      TEXT NOT NULL DEFAULT 'invoice',   -- invoice | credit
     platform      TEXT NOT NULL DEFAULT '',
     remote_id     TEXT NOT NULL DEFAULT '',
+    job_number    TEXT NOT NULL DEFAULT '',   -- job this was filed against
     filename      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_procdoc_hash ON processed_documents(file_hash, platform);
@@ -190,6 +191,12 @@ class Database:
         with self._lock:
             have = {r["name"] for r in
                     self._conn.execute("PRAGMA table_info(customers)")}
+            cols = {r["name"] for r in
+                    self._conn.execute("PRAGMA table_info(processed_documents)")}
+            if "job_number" not in cols:
+                self._conn.execute("ALTER TABLE processed_documents ADD COLUMN "
+                                   "job_number TEXT NOT NULL DEFAULT ''")
+                self._conn.commit()
             if "reviewed" not in have:
                 # Existing customers were added deliberately, so mark them seen.
                 self._conn.execute("ALTER TABLE customers ADD COLUMN "
@@ -605,15 +612,45 @@ class Database:
 
     def record_document_sent(self, *, file_hash: str, customer_name: str,
                              invoice_ref: str, doc_type: str, platform: str,
-                             remote_id: str, filename: str) -> None:
+                             remote_id: str, filename: str,
+                             job_number: str = "") -> None:
         """Remember a successful upload so it is never repeated."""
         self._exec(
             "INSERT INTO processed_documents"
-            "(ts,file_hash,customer_name,invoice_ref,doc_type,platform,remote_id,filename) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "(ts,file_hash,customer_name,invoice_ref,doc_type,platform,remote_id,"
+            "job_number,filename) VALUES(?,?,?,?,?,?,?,?,?)",
             (_utcnow(), file_hash, customer_name, invoice_ref, doc_type,
-             platform, remote_id, filename),
+             platform, remote_id, job_number, filename),
         )
+
+    def find_job_for_credit(self, customer_name: str, refs: list[str],
+                            platform: str) -> tuple[str, str]:
+        """Job number to file a credit against, and how it was decided.
+
+        Credit notes usually quote the invoice they are crediting rather than a
+        job number, so prefer an exact match on a previously uploaded invoice
+        reference; otherwise fall back to that customer's most recent job.
+        Returns ("", "") when nothing is known.
+        """
+        wanted = [r.strip() for r in refs if r and r.strip()]
+        for ref in wanted:
+            rows = self._query(
+                "SELECT job_number FROM processed_documents "
+                "WHERE customer_name=? COLLATE NOCASE AND invoice_ref=? COLLATE NOCASE "
+                "AND doc_type='invoice' AND platform=? AND job_number<>'' "
+                "ORDER BY id DESC LIMIT 1",
+                (customer_name, ref, platform))
+            if rows:
+                return rows[0]["job_number"], f"matched invoice {ref}"
+
+        rows = self._query(
+            "SELECT job_number FROM processed_documents "
+            "WHERE customer_name=? COLLATE NOCASE AND doc_type='invoice' "
+            "AND platform=? AND job_number<>'' ORDER BY id DESC LIMIT 1",
+            (customer_name, platform))
+        if rows:
+            return rows[0]["job_number"], "most recent invoice for this customer"
+        return "", ""
 
     def last_seen_email_time(self) -> str | None:
         """Received timestamp of the newest handled email, or None."""

@@ -48,31 +48,58 @@ class ServiceM8Provider(Provider):
         except requests.RequestException as exc:
             return UploadResult(False, self.label, f"Connection error: {exc}")
 
-    def _find_job_uuid(self, job_number: str) -> str | None:
-        """Resolve a human job number to a ServiceM8 job UUID."""
-        if not job_number:
-            return None
-        filt = requests.utils.quote(f"generated_job_id eq '{job_number}'")
-        r = self.http.get(f"{API}/job.json?%24filter={filt}", headers=self._headers(), timeout=20)
-        r.raise_for_status()
-        rows = r.json()
-        if not rows:
-            # Fall back to the internal sequential job_number field.
-            filt2 = requests.utils.quote(f"job_number eq '{job_number}'")
-            r = self.http.get(f"{API}/job.json?%24filter={filt2}", headers=self._headers(), timeout=20)
+    #: Job fields a supplier's reference might correspond to. generated_job_id
+    #: is what ServiceM8 shows as the job number; job_number is the internal
+    #: sequence; purchase_order_number covers suppliers who quote the PO.
+    JOB_FIELDS = ("generated_job_id", "job_number", "purchase_order_number")
+
+    def _lookup(self, field: str, value: str) -> str | None:
+        """UUID of the job whose ``field`` equals ``value``, or None."""
+        filt = requests.utils.quote(f"{field} eq '{value}'")
+        try:
+            r = self.http.get(f"{API}/job.json?%24filter={filt}",
+                              headers=self._headers(), timeout=20)
             r.raise_for_status()
-            rows = r.json()
+        except requests.RequestException:
+            # An unsupported field just means "no match by this route".
+            return None
+        rows = r.json()
         return rows[0]["uuid"] if rows else None
+
+    def _find_job_uuid(self, ctx: UploadContext) -> tuple[str | None, str]:
+        """Find the job, trying every reference the document offered.
+
+        The parser cannot know which number on an invoice is the job number, so
+        it hands over candidates and ServiceM8 - the system of record - decides.
+        Returns (uuid, which_number_matched).
+        """
+        tried: list[str] = []
+        for value in [ctx.job_number, *ctx.job_candidates]:
+            value = (value or "").strip()
+            if not value or value in tried:
+                continue
+            tried.append(value)
+            for field in self.JOB_FIELDS:
+                uuid = self._lookup(field, value)
+                if uuid:
+                    return uuid, value
+        self._tried = tried
+        return None, ""
 
     def upload_invoice(self, ctx: UploadContext) -> UploadResult:
         """Resolve the job, create an attachment record, upload the bytes."""
         try:
-            job_uuid = self._find_job_uuid(ctx.job_number)
+            self._tried = []
+            job_uuid, matched = self._find_job_uuid(ctx)
             if not job_uuid:
+                tried = ", ".join(self._tried) or "(nothing readable)"
                 return UploadResult(
                     False, self.label,
-                    f"No ServiceM8 job found for job number '{ctx.job_number}'.",
-                )
+                    f"No ServiceM8 job matched any reference on this document. "
+                    f"Tried: {tried}.")
+            # Keep the number that actually matched, so a later credit note can
+            # be linked back to the same job.
+            ctx.job_number = matched
 
             fname = ctx.file_path.name
             mime = mimetypes.guess_type(fname)[0] or "application/pdf"

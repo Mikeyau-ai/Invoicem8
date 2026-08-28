@@ -12,7 +12,7 @@ writing one subclass and listing it in :mod:`integrations.registry`.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 #: Seconds of headroom before a cached access token is treated as expired.
@@ -32,6 +32,9 @@ class UploadContext:
     file_path: Path
     email_subject: str
     doc_type: str = "invoice"        # "invoice" | "credit"
+    #: Other reference numbers on the document, best guess first. A service
+    #: provider may try these when the labelled job number is absent or wrong.
+    job_candidates: list = field(default_factory=list)
 
     @property
     def is_credit(self) -> bool:

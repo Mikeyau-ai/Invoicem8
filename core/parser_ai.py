@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import requests
@@ -40,6 +40,16 @@ Return ONLY minified JSON with these keys:
                    signal - but ignore ordinary payment wording such as
                    "credit card", "credit terms" or "credit limit", which
                    appears on normal invoices.
+                   NOTE: a CREDIT NOTE usually has NO job number - it quotes
+                   the ORIGINAL INVOICE it is crediting. For a credit, put that
+                   original invoice number in job_candidates so it can be
+                   traced back to the right job.
+  job_candidates - ARRAY of every reference number on the document that could
+                   plausibly be the job number, best guess first. Include the
+                   job number, any purchase order number, and any other long
+                   number you are unsure about. Getting the JOB number right
+                   matters more than anything else here - when in doubt list
+                   the extra candidate rather than omitting it.
   confidence     - 0..1 float, your confidence in customer_name
 Do not include commentary. If unknown, use "".
 
@@ -77,6 +87,10 @@ class ParseResult:
     amount_total: str = ""
     invoice_date: str = ""
     doc_type: str = "invoice"        # "invoice" | "credit"
+    #: Every plausible job/reference number found, best guess first. The job
+    #: number is the field that actually has to be right, so the service
+    #: provider verifies these against real jobs instead of trusting one guess.
+    job_candidates: list = field(default_factory=list)
     confidence: float = 0.0
     source: str = "regex"
 
@@ -344,6 +358,33 @@ def _looks_like_credit(blob: str) -> bool:
     return bool(re.search(r"\bcredits?\b", cleaned, re.I))
 
 
+def _reference_candidates(blob: str, filenames: str, *first) -> list[str]:
+    """Every number that might be the job, best guess first.
+
+    The parser cannot know which number on an invoice is the JOB number - a
+    document often carries an invoice number, a PO and a job number, and
+    suppliers label them inconsistently. So collect them all and let the
+    service system say which one is a real job.
+
+    Order: explicitly labelled values, then digits in the filename, then any
+    other 3+ digit run in the document.
+    """
+    out: list[str] = []
+
+    def add(value: str) -> None:
+        value = (value or "").strip(" -/:#")
+        if value and any(c.isdigit() for c in value) and value not in out:
+            out.append(value)
+
+    for value in first:                      # labelled job / invoice / filename
+        add(value)
+    for m in re.finditer(r"\d{3,}", filenames):
+        add(m.group(0))
+    for m in re.finditer(r"[A-Za-z]{0,4}[-/]?\d{3,}", blob):
+        add(m.group(0))
+    return out[:12]                          # bounded: each costs a lookup
+
+
 def _regex_fallback(subject: str, body: str, attachment: str,
                     filenames: str = "") -> ParseResult:
     """Cheap heuristic extraction when AI is unavailable."""
@@ -398,6 +439,7 @@ def _regex_fallback(subject: str, body: str, attachment: str,
     is_credit = _looks_like_credit(blob)
 
     fn_name, fn_num = _from_filename(filenames)
+    candidates = _reference_candidates(blob, filenames, job_number, invoice_ref, fn_num)
     customer = (cust.group(1).splitlines()[0].strip() if cust else "") or fn_name
     job_number = job_number or fn_num
     return ParseResult(
@@ -405,6 +447,7 @@ def _regex_fallback(subject: str, body: str, attachment: str,
         job_number=job_number,
         invoice_ref=invoice_ref,
         doc_type="credit" if is_credit else "invoice",
+        job_candidates=candidates,
         confidence=0.5 if (customer and job_number) else (0.2 if customer else 0.0),
         source="regex+filename" if (fn_name or fn_num) else "regex",
     )
@@ -511,6 +554,9 @@ class InvoiceParser:
                         invoice_ref=str(data.get("invoice_ref", "")).strip(),
                         amount_total=str(data.get("amount_total", "")).strip(),
                         invoice_date=str(data.get("invoice_date", "")).strip(),
+                        job_candidates=[str(v).strip() for v in
+                                        (data.get("job_candidates") or [])
+                                        if str(v).strip()],
                         doc_type=("credit" if str(data.get("doc_type", "")).strip().lower()
                                   .startswith("credit") else "invoice"),
                         confidence=float(data.get("confidence", 0) or 0),

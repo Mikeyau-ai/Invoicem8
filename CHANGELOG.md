@@ -3,6 +3,28 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.34
+Job matching is the part that has to be right, so it no longer rests on a
+single guess.
+
+- **Invoices: every reference on the document is tried against real jobs.** The
+  parser now collects all plausible numbers (labelled job number, filename
+  digits, any other long number) and ServiceM8 - the system of record - decides
+  which is a real job, checking the job number, the internal number and the
+  purchase order number. The first that matches wins, and the matched number is
+  recorded. If none match, the error lists every number tried.
+- **Credit notes no longer need a job number.** Credits quote the invoice they
+  are crediting, not a job, so requiring one failed them outright. Every upload
+  now records the job it was filed against, and a credit is linked by matching
+  the invoice number it quotes to an invoice already processed.
+- If a credit quotes nothing recognisable, it falls back to the customer's most
+  recent invoice and says so as a WARNING - it is a guess and should be checked,
+  not buried in the routine log. With no history at all the credit is held with
+  an explanation rather than filed against a guess.
+- The AI prompt now asks for candidate references and states that a credit
+  carries the original invoice number rather than a job number.
+- New in-app guide "How invoices are matched to jobs".
+
 ## 1.0.33
 - **New suppliers are added automatically instead of prompting.** A modal per
   unknown supplier does not scale once the AI is reading real mail, so an

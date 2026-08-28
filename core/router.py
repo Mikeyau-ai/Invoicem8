@@ -54,6 +54,7 @@ class Router:
             file_path=file_path,
             email_subject=subject,
             doc_type=parsed.doc_type,
+            job_candidates=list(parsed.job_candidates or []),
         )
 
     @staticmethod
@@ -188,10 +189,9 @@ class Router:
 
         ok_any = False
         for provider in targets:
-            if not ctx.job_number and provider.category == "service":
-                self._record_error("routing", ctx, provider.label,
-                                   f"Missing job number for {provider.label} upload.")
-                continue
+            if provider.category == "service" and not ctx.job_number:
+                if not self._resolve_job(ctx, provider):
+                    continue
             if not provider.configured():
                 self._record_error("config", ctx, provider.label,
                                    f"{provider.label} credentials are incomplete.")
@@ -222,7 +222,7 @@ class Router:
                     file_hash=file_hash, customer_name=ctx.customer_name,
                     invoice_ref=ctx.invoice_ref, doc_type=ctx.doc_type,
                     platform=result.platform, remote_id=result.remote_id,
-                    filename=ctx.file_path.name)
+                    job_number=ctx.job_number, filename=ctx.file_path.name)
                 msg = f"[{kind}] {result.detail}"
                 # Only emit: the GUI's emit_event() persists every non-error
                 # event, so writing the row here as well logged each upload
@@ -233,6 +233,49 @@ class Router:
             else:
                 self._record_error("upload", ctx, result.platform, result.detail)
         return ok_any
+
+    def _resolve_job(self, ctx: UploadContext, provider) -> bool:
+        """Fill in a missing job number, or record why it could not be.
+
+        Credit notes typically quote the invoice they are crediting rather than
+        a job number, so look up the job we filed that invoice against. Plain
+        invoices can still fall back to the other reference numbers found on
+        the document, which the provider verifies against real jobs.
+        """
+        if ctx.is_credit:
+            refs = [ctx.invoice_ref, *ctx.job_candidates]
+            job, how = self._db.find_job_for_credit(ctx.customer_name, refs,
+                                                    provider.label)
+            if job:
+                ctx.job_number = job
+                # An exact invoice match is certain; "most recent invoice" is a
+                # guess, so it is logged as a WARN to be checked rather than
+                # buried among the routine INFO lines.
+                exact = how.startswith("matched invoice")
+                self._emit(level="INFO" if exact else "WARN",
+                           customer_name=ctx.customer_name,
+                           invoice_ref=ctx.invoice_ref, platform=provider.label,
+                           action="credit linked", filename=ctx.file_path.name,
+                           message=(f"Credit note filed against job {job} ({how})."
+                                    + ("" if exact else " This is a best guess - "
+                                       "the credit did not quote an invoice we "
+                                       "have on record. Check it."))) 
+                return True
+            self._record_error(
+                "routing", ctx, provider.label,
+                "Credit note has no job number, and no earlier invoice for "
+                f"'{ctx.customer_name}' is on record to link it to. Upload the "
+                "original invoice first, or set the job number and retry.")
+            return False
+
+        if ctx.job_candidates:
+            # Nothing labelled as a job, but the provider can test the other
+            # numbers on the document against real jobs.
+            return True
+
+        self._record_error("routing", ctx, provider.label,
+                           f"No job number could be read for {provider.label}.")
+        return False
 
     def _record_error(self, stage: str, ctx: UploadContext, platform: str,
                       message: str) -> None:
