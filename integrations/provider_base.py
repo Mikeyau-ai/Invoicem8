@@ -11,8 +11,12 @@ writing one subclass and listing it in :mod:`integrations.registry`.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
+
+#: Seconds of headroom before a cached access token is treated as expired.
+_TOKEN_SKEW = 60
 
 
 @dataclass
@@ -31,6 +35,7 @@ class UploadContext:
 
     @property
     def is_credit(self) -> bool:
+        """True when this document is a credit note rather than an invoice."""
         return self.doc_type == "credit"
 
 
@@ -57,7 +62,38 @@ class Provider:
     setting_fields: list[tuple[str, str, bool]] = []
 
     def __init__(self, settings) -> None:
+        """Bind the provider to the settings store it reads credentials from."""
         self._settings = settings
+        self._session = None
+        self._token: tuple[str, float] = ("", 0.0)   # (access_token, expires_at)
+
+    @property
+    def http(self):
+        """Shared :class:`requests.Session` for this provider instance.
+
+        Every call to the same API host then reuses one TLS connection instead
+        of paying a fresh handshake per request.
+        """
+        if self._session is None:
+            import requests
+
+            self._session = requests.Session()
+        return self._session
+
+    def _cached_access_token(self, refresh) -> str:
+        """Return a live bearer token, refreshing only when the old one expires.
+
+        ``refresh`` is a callable returning ``(token, lifetime_seconds)``.
+        Without this every request re-ran the OAuth refresh - two-plus round
+        trips per upload, and for the providers that rotate refresh tokens, an
+        encrypted settings write each time too.
+        """
+        token, expires_at = self._token
+        if token and time.monotonic() < expires_at:
+            return token
+        token, ttl = refresh()
+        self._token = (token, time.monotonic() + max(0, int(ttl) - _TOKEN_SKEW))
+        return token
 
     def configured(self) -> bool:
         """True when every mandatory setting for this provider is present."""
@@ -70,9 +106,11 @@ class Provider:
         return [lbl for k, lbl, _ in self.setting_fields if not self._settings.get(k)]
 
     def test_connection(self) -> UploadResult:
+        """Verify credentials against the live API. Subclasses must implement."""
         raise NotImplementedError
 
     def upload_invoice(self, ctx: UploadContext) -> UploadResult:
+        """File one attachment in the remote system. Subclasses must implement."""
         raise NotImplementedError
 
 
@@ -89,12 +127,15 @@ class NoneProvider(Provider):
     setting_fields = []
 
     def configured(self) -> bool:
+        """Never configured - selecting 'none' means routing is off."""
         return False
 
     def test_connection(self) -> UploadResult:
+        """Always fails: there is nothing to connect to."""
         return UploadResult(False, self.label, "No provider selected.")
 
     def upload_invoice(self, ctx: UploadContext) -> UploadResult:
+        """Always fails: there is nothing to upload to."""
         return UploadResult(False, self.label, "No provider selected.")
 
 
@@ -109,6 +150,7 @@ class StubProvider(Provider):
     implemented = False
 
     def test_connection(self) -> UploadResult:
+        """Report whether credentials are complete; never actually connects."""
         missing = self.missing_fields()
         if missing:
             return UploadResult(False, self.label, f"Missing: {', '.join(missing)}")
@@ -119,6 +161,7 @@ class StubProvider(Provider):
         )
 
     def upload_invoice(self, ctx: UploadContext) -> UploadResult:
+        """Always fails loudly so the invoice lands in the retry queue."""
         return UploadResult(
             False, self.label,
             f"{self.label} upload is not implemented in this build.",

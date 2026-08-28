@@ -3,6 +3,59 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.30
+Efficiency pass over the whole ingest path, plus a full code-annotation sweep.
+See `plan.md` for the findings this implements.
+
+- **Emails already processed are no longer re-downloaded.** The mail backends
+  now receive the set of handled message ids and skip those *before* touching
+  their attachments. An invoice sitting in the inbox used to have its files
+  re-fetched and rewritten on every single poll.
+- **Only wanted attachment types are downloaded.** The watcher passes the union
+  of every customer's enabled file types to the mailbox, so signature images
+  and other junk never reach the disk. Per-customer filtering still happens in
+  the router.
+- **IMAP now fetches headers first.** It used to download every full message -
+  attachments included - for up to 500 search hits just to read the Date
+  header, then throw most of them away. Headers come back in a few batched
+  round trips; full bodies are fetched only for messages that survive the date
+  and dedupe filters.
+- **Graph folds attachments into the list query** via `$expand`, removing one
+  HTTP round trip per message, and now follows `@odata.nextLink` - after a long
+  outage the back-check was silently truncated at the newest 100 messages.
+- **OAuth tokens are cached until they expire.** Xero, MYOB and QuickBooks
+  refreshed the token on *every* request; combined with rebuilding the provider
+  per attachment, a three-file email cost three refreshes per platform. Both
+  are fixed: providers are now built once per email.
+- **Connection reuse**: every provider and the Graph backend now use a
+  `requests.Session` instead of a fresh TLS handshake per call.
+- **Reading a setting no longer scans the settings table.** Checking whether a
+  key existed re-read every row; opening the Settings window did that dozens of
+  times.
+- **Customer alias lookup is indexed** rather than loading every customer and
+  parsing their alias JSON on each miss.
+- **Settings connection tests run off the UI thread.** "Test mailbox" performed
+  a full mailbox fetch *including attachment downloads* on the Tk thread and
+  froze the window; it is now a headers-only probe that writes nothing.
+- **New "Test AI" button** sends a small synthetic invoice through the
+  configured AI provider and reports what it extracted - proving the key,
+  endpoint, model name and JSON-mode support in one click.
+- **Bounded growth**: cached attachments are pruned after a configurable
+  retention (default 30 days, new Settings field), keeping anything a queued
+  retry still needs; the diagnostic log file now rotates; and the activity log
+  is trimmed to its newest 20,000 rows.
+- **Fixed: queued invoices were never replayed.** `add_pending` wrote an empty
+  status, so the "add this customer, then route their waiting invoices" step
+  never found anything to route.
+- Smaller wins: attachment hashing reads in chunks instead of loading whole
+  files; Xero and ServiceM8 stream uploads rather than buffering them; MYOB
+  rejects oversized attachments with a clear message; the watcher-running
+  border animation ticks at 200 ms instead of 80 ms and pauses while minimised;
+  the activity log repaints in blocks rather than row by row; text extraction
+  skips formats it cannot read.
+- Every function, method and class in the codebase now carries a purpose
+  docstring (148 were missing).
+
 ## 1.0.29
 - Reference parsing now understands how suppliers actually label these fields
   instead of one fixed phrasing. Invoice side: Invoice No/Number/#/ID, Tax

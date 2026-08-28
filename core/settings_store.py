@@ -67,6 +67,7 @@ DEFAULTS = {
     "ai.model": "",                       # blank -> provider default
     "ai.compat_base_url": "http://localhost:11434/v1",  # OpenAI-compatible endpoint
     "watcher.poll_minutes": "5",
+    "watcher.cache_days": "30",           # attachment-cache retention
     "watcher.unread_only": "0",   # dedupe is by message-id, not the read flag
     "watcher.autostart": "0",             # start watcher when app opens
     "app.run_on_startup": "0",
@@ -77,20 +78,28 @@ class Settings:
     """Load/save helper around the ``settings`` DB table."""
 
     def __init__(self, db: Database, box: SecretBox) -> None:
+        """Bind the settings table to the secret box used for encrypted keys."""
         self._db = db
         self._box = box
 
     def get(self, key: str, default: str | None = None) -> str:
-        """Return a decrypted setting value (or the default)."""
-        raw, enc = self._db.get_setting(key, "")
-        if raw == "" and key not in self._explicitly_set():
+        """Return a decrypted setting value (or the default).
+
+        ``found`` comes back from the same row lookup, so distinguishing "never
+        set" from "stored empty" costs nothing extra - it used to require
+        reading the entire settings table on every miss.
+        """
+        raw, enc, found = self._db.get_setting(key, "")
+        if raw == "" and not found:
             return default if default is not None else DEFAULTS.get(key, "")
         return self._box.decrypt(raw) if enc else raw
 
     def get_bool(self, key: str) -> bool:
+        """Read a setting as a boolean flag."""
         return self.get(key, DEFAULTS.get(key, "0")).strip() in ("1", "true", "True", "yes")
 
     def get_int(self, key: str, default: int = 0) -> int:
+        """Read a setting as an int, falling back on anything unparseable."""
         try:
             return int(self.get(key, str(default)))
         except (TypeError, ValueError):
@@ -105,15 +114,13 @@ class Settings:
             self._db.set_setting(key, value, encrypted=False)
 
     def update(self, mapping: dict[str, str]) -> None:
+        """Persist several settings at once."""
         for k, v in mapping.items():
             self.set(k, v)
 
     def as_dict(self, keys: list[str]) -> dict[str, str]:
         """Bulk read used by the Settings tab to populate fields."""
         return {k: self.get(k) for k in keys}
-
-    def _explicitly_set(self) -> set[str]:
-        return set(self._db.all_settings().keys())
 
     def unreadable_secrets(self) -> list[str]:
         """Encrypted settings that no longer decrypt, so must be re-entered.

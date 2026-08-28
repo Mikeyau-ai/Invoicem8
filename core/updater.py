@@ -37,6 +37,7 @@ _STATE = USER_ROOT / "updater.json"
 
 # -- tiny JSON state (two keys, not worth the DB) -----------------------
 def _state() -> dict:
+    """Read the tiny updater state file; {} if absent or corrupt."""
     try:
         return json.loads(_STATE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -44,6 +45,7 @@ def _state() -> dict:
 
 
 def _save_state(key: str, value) -> None:
+    """Merge one key into the updater state file."""
     data = _state()
     data[key] = value
     try:
@@ -75,6 +77,7 @@ def running_exe() -> Path:
 
 
 def is_frozen() -> bool:
+    """True when running as the built .exe rather than from source."""
     return bool(getattr(sys, "frozen", False))
 
 
@@ -84,6 +87,7 @@ def is_enabled() -> bool:
 
 
 def set_enabled(on: bool) -> None:
+    """Persist the auto-update-check preference."""
     _save_state("update_check", bool(on))
 
 
@@ -104,6 +108,7 @@ class UpdateInfo:
 
     @property
     def size_mb(self) -> float:
+        """Download size in megabytes, for the dialog."""
         return self.size / (1024 * 1024)
 
     def note_lines(self) -> list[str]:
@@ -156,6 +161,7 @@ def _fetch_latest() -> UpdateInfo | None:
 
 
 def _is_newer(info: UpdateInfo) -> bool:
+    """True when this release is newer and has not been skipped."""
     if _parse_version(info.version) <= _parse_version(current_version()):
         return False
     return _state().get("skip_version") != info.version
@@ -179,6 +185,7 @@ def start_check() -> None:
         return
 
     def _work() -> None:
+        """Daemon thread body: fetch, compare, publish the result."""
         global _result
         try:
             info = _fetch_latest()

@@ -31,6 +31,9 @@ RUN_VALUE_NAME = APP_NAME
 
 # Watcher defaults.
 DEFAULT_POLL_MINUTES = 5
+# How long a processed email's cached attachments are kept on disk. They are
+# only needed while an upload might still be retried; see core.housekeeping.
+CACHE_RETENTION_DAYS = 30
 SUPPORTED_FILE_TYPES = ["pdf", "docx", "csv", "xlsx", "png", "jpg"]
 DEFAULT_FILE_TYPES = ["pdf"]
 

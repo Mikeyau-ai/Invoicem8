@@ -32,6 +32,7 @@ class Router:
     """Routes one parsed invoice to the enabled destinations."""
 
     def __init__(self, db: Database, settings, on_new_customer=None, emit=None) -> None:
+        """Wire the router to the DB, settings and the UI callbacks."""
         self._db = db
         self._settings = settings
         self._on_new_customer = on_new_customer          # callable(name, pending_id)
@@ -54,11 +55,18 @@ class Router:
 
     @staticmethod
     def _file_hash(path: Path) -> str:
-        """SHA-256 of the attachment bytes - identifies an identical file."""
+        """SHA-256 of the attachment bytes - identifies an identical file.
+
+        Read in chunks so a large scanned PDF is never held in memory whole.
+        """
+        digest = hashlib.sha256()
         try:
-            return hashlib.sha256(path.read_bytes()).hexdigest()
+            with path.open("rb") as fh:
+                while chunk := fh.read(1 << 20):
+                    digest.update(chunk)
         except OSError:
             return ""
+        return digest.hexdigest()
 
     def route(self, parsed: ParseResult, attachments: list[Path],
               subject: str, sender: str) -> str:
@@ -84,6 +92,16 @@ class Router:
                     self._on_new_customer(parsed.customer_name, pid)
             return "pending_new_customer"
 
+        # Providers depend only on settings and the customer's toggles, not on
+        # the file, so build them once per email rather than per attachment -
+        # each construction otherwise costs a fresh OAuth token refresh.
+        targets = self._targets_for(customer)
+        if not targets:
+            self._emit(level="WARN", customer_name=customer["name"],
+                       invoice_ref=parsed.invoice_ref, platform="-", action="no_route",
+                       message="Customer matched but no upload toggles enabled.")
+            return "no_route"
+
         allowed = set(customer["file_types"].split(","))
         routed_any = False
         for path in attachments:
@@ -95,11 +113,11 @@ class Router:
                            message=f"File type .{ext} not enabled for this customer.")
                 continue
             ctx = self._ctx(customer, parsed, path, subject)
-            routed_any |= self._dispatch(customer, ctx)
+            routed_any |= self._dispatch(customer, ctx, targets)
         return "routed" if routed_any else "no_route"
 
-    def _dispatch(self, customer, ctx: UploadContext) -> bool:
-        """Fire each enabled provider for a single file.
+    def _targets_for(self, customer) -> list:
+        """Resolve the providers this customer's toggles point at.
 
         ``servicem8_enabled`` is the generic "Service system" toggle and
         ``accounting_enabled`` the "Accounting system" toggle - each resolves
@@ -114,7 +132,16 @@ class Router:
             prov = build_accounting_provider(self._settings)
             if prov.key != "none" and prov.key not in {t.key for t in targets}:
                 targets.append(prov)
+        return targets
 
+    def _dispatch(self, customer, ctx: UploadContext, targets=None) -> bool:
+        """Fire each enabled provider for a single file.
+
+        ``targets`` is the pre-resolved provider list from :meth:`_targets_for`;
+        it is only rebuilt here when a caller (the error-tab retry) has none.
+        """
+        if targets is None:
+            targets = self._targets_for(customer)
         if not targets:
             self._emit(level="WARN", customer_name=customer["name"],
                        invoice_ref=ctx.invoice_ref, platform="-", action="no_route",

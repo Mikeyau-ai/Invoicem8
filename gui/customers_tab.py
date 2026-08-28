@@ -17,6 +17,7 @@ class CustomersTab:
     """Builds and manages the Customer Management tab."""
 
     def __init__(self, parent, app) -> None:
+        """Build the customer list column and the edit form beside it."""
         self._app = app
         self._db = app.db
         self._current_id: int | None = None
@@ -57,9 +58,9 @@ class CustomersTab:
         for row in self._db.list_customers():
             tags = []
             if row["servicem8_enabled"]:
-                tags.append(label_for(self._app.settings.get("service.provider", "servicem8")))
+                tags.append(svc_label)          # resolved once, above the loop
             if row["accounting_enabled"]:
-                tags.append(label_for(self._app.settings.get("accounting.provider", "none")))
+                tags.append(acct_label)
             label = f"{row['name']}  ·  {'/'.join(tags) or 'off'}"
             btn = ctk.CTkButton(self._list, text=label, anchor="w",
                                 fg_color=C["row"], hover_color=C["select"],
@@ -69,6 +70,7 @@ class CustomersTab:
 
     # -- form ---------------------------------------------------
     def _build_form(self) -> None:
+        """Lay out the customer profile fields, toggles and buttons."""
         f = self._form
         ctk.CTkLabel(f, text="Customer profile", font=FONT_HEAD,
                      text_color=C["blue"]).pack(anchor="w", padx=6, pady=(8, 6))
@@ -107,6 +109,7 @@ class CustomersTab:
         self._status.pack(anchor="w", padx=6)
 
     def _entry(self, parent, label: str) -> ctk.CTkEntry:
+        """One labelled text field in the profile form."""
         wrap = ctk.CTkFrame(parent, fg_color=C["bg"])
         wrap.pack(fill="x", padx=6, pady=3)
         ctk.CTkLabel(wrap, text=label, font=FONT_UI, text_color=C["text"],
@@ -117,6 +120,7 @@ class CustomersTab:
 
     # -- load / new / save / delete ------------------------------
     def _new(self) -> None:
+        """Clear the form to create a customer from scratch."""
         self._current_id = None
         for e in (self._name, self._aliases, self._sm8_uuid, self._acct_id, self._notes):
             e.delete(0, "end")
@@ -126,6 +130,7 @@ class CustomersTab:
         self._status.configure(text="New customer - fill in and Save.", text_color=C["dim"])
 
     def _load(self, cid: int) -> None:
+        """Populate the form from one stored customer profile."""
         row = self._db.get_customer(cid)
         if not row:
             return
@@ -145,6 +150,7 @@ class CustomersTab:
         self._status.configure(text=f"Loaded '{row['name']}'.", text_color=C["dim"])
 
     def _collect(self) -> dict:
+        """Read the form back into an upsert-ready dict."""
         return {
             "id": self._current_id,
             "name": self._name.get().strip(),
@@ -159,6 +165,7 @@ class CustomersTab:
         }
 
     def _save(self) -> None:
+        """Validate and persist the form, then refresh the list."""
         data = self._collect()
         if not data["name"]:
             self._status.configure(text="Name is required.", text_color=C["red"])
@@ -171,6 +178,7 @@ class CustomersTab:
             self._status.configure(text=f"Save failed: {exc}", text_color=C["red"])
 
     def _delete(self) -> None:
+        """Remove the loaded customer and reset the form."""
         if self._current_id is None:
             return
         self._db.delete_customer(self._current_id)

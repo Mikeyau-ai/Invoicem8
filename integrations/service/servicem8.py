@@ -24,20 +24,24 @@ API = "https://api.servicem8.com/api_1.0"
 
 
 class ServiceM8Provider(Provider):
+    """Attaches invoice files to a ServiceM8 job, matched by job number."""
+
     key = "servicem8"
     label = "ServiceM8"
     category = "service"
     setting_fields = [("servicem8.api_key", "Private App API Key", True)]
 
     def _headers(self) -> dict:
+        """Private-app API key header sent on every ServiceM8 call."""
         return {
             "X-API-Key": self._settings.get("servicem8.api_key"),
             "Accept": "application/json",
         }
 
     def test_connection(self) -> UploadResult:
+        """Request a single job to prove the API key works."""
         try:
-            r = requests.get(f"{API}/job.json?%24top=1", headers=self._headers(), timeout=20)
+            r = self.http.get(f"{API}/job.json?%24top=1", headers=self._headers(), timeout=20)
             if r.status_code == 200:
                 return UploadResult(True, self.label, "Connected to ServiceM8.")
             return UploadResult(False, self.label, f"HTTP {r.status_code}: {r.text[:200]}")
@@ -49,18 +53,19 @@ class ServiceM8Provider(Provider):
         if not job_number:
             return None
         filt = requests.utils.quote(f"generated_job_id eq '{job_number}'")
-        r = requests.get(f"{API}/job.json?%24filter={filt}", headers=self._headers(), timeout=20)
+        r = self.http.get(f"{API}/job.json?%24filter={filt}", headers=self._headers(), timeout=20)
         r.raise_for_status()
         rows = r.json()
         if not rows:
             # Fall back to the internal sequential job_number field.
             filt2 = requests.utils.quote(f"job_number eq '{job_number}'")
-            r = requests.get(f"{API}/job.json?%24filter={filt2}", headers=self._headers(), timeout=20)
+            r = self.http.get(f"{API}/job.json?%24filter={filt2}", headers=self._headers(), timeout=20)
             r.raise_for_status()
             rows = r.json()
         return rows[0]["uuid"] if rows else None
 
     def upload_invoice(self, ctx: UploadContext) -> UploadResult:
+        """Resolve the job, create an attachment record, upload the bytes."""
         try:
             job_uuid = self._find_job_uuid(ctx.job_number)
             if not job_uuid:
@@ -83,7 +88,7 @@ class ServiceM8Provider(Provider):
                 "file_type": "." + fname.rsplit(".", 1)[-1].lower(),
                 "active": 1,
             }
-            r = requests.post(f"{API}/attachment.json", headers=self._headers(),
+            r = self.http.post(f"{API}/attachment.json", headers=self._headers(),
                               json=meta, timeout=30)
             r.raise_for_status()
             att_uuid = r.headers.get("x-record-uuid") or r.json().get("uuid", "")
@@ -91,11 +96,12 @@ class ServiceM8Provider(Provider):
                 return UploadResult(False, self.label, "ServiceM8 did not return an attachment UUID.")
 
             # 2. upload the bytes
+            # Stream the file object rather than reading it into memory.
             with ctx.file_path.open("rb") as fh:
-                up = requests.post(
+                up = self.http.post(
                     f"{API}/attachment/{att_uuid}.file",
                     headers={**self._headers(), "Content-Type": mime},
-                    data=fh.read(), timeout=60,
+                    data=fh, timeout=60,
                 )
             up.raise_for_status()
             return UploadResult(True, self.label,

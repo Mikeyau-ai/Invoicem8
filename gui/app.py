@@ -26,11 +26,16 @@ from gui.update_dialog import UpdateDialog
 from integrations.registry import label_for
 from version import APP_VERSION
 
+#: Watcher-running border pulse: steps per cycle and ms between them.
+_GLOW_STEPS = 20
+_GLOW_INTERVAL_MS = 200
+
 
 class App(ctk.CTk):
     """Top-level window. Owns the DB, settings, watcher and all tabs."""
 
     def __init__(self, db: Database, settings: Settings, box, autostart: bool = False) -> None:
+        """Build the window, tabs and watcher, then start the event pump."""
         super().__init__()
         self.db = db
         self.settings = settings
@@ -77,6 +82,7 @@ class App(ctk.CTk):
 
     # -- header --------------------------------------------------
     def _build_header(self) -> None:
+        """Top bar: wordmark, tagline and the Scan/Start/Settings buttons."""
         bar = ctk.CTkFrame(self, fg_color=C["panel"], corner_radius=0, height=54)
         bar.pack(fill="x")
         bar.pack_propagate(False)
@@ -101,6 +107,7 @@ class App(ctk.CTk):
 
     # -- tabs ---------------------------------------------------
     def _build_tabs(self) -> None:
+        """Create the three main tabs inside the glow border frame."""
         # Outer frame carries the "watcher running" glow border.
         self._glow = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=8,
                                   border_width=2, border_color=C["border"])
@@ -186,8 +193,10 @@ class App(ctk.CTk):
         import threading
 
         def work() -> None:
+            """Worker thread: run the check, then hand back to Tk."""
             info = updater.check_now()
             def show() -> None:
+                """Tk thread: report the outcome."""
                 if info is None:
                     on_result(f"You're up to date (v{APP_VERSION})."
                               if updater.is_frozen()
@@ -252,12 +261,14 @@ class App(ctk.CTk):
 
     # -- misc callbacks ---------------------------------------
     def _toggle_watcher(self) -> None:
+        """Start/Stop button: flip the watcher state."""
         if self.watcher.running:
             self.watcher.stop()
         else:
             self.watcher.start()
 
     def _scan_now(self) -> None:
+        """Scan-now button: start the watcher if idle, then force a poll."""
         if not self.watcher.running:
             self.watcher.start()
         self.watcher.scan_now()
@@ -281,13 +292,23 @@ class App(ctk.CTk):
             self._glow.configure(border_color=C["border"])
 
     def _glow_tick(self) -> None:
-        """Pulse the tab-area border green while the watcher runs."""
+        """Pulse the tab-area border green while the watcher runs.
+
+        This runs for as long as the watcher is on - i.e. all day - so it ticks
+        at 200 ms rather than 80 ms (the same ~4s cycle, a third of the
+        redraws) and does no work at all while the window is minimised.
+        """
         if self._closing:
             return
-        self._glow_phase = (self._glow_phase + 1) % 48
-        t = (math.sin(self._glow_phase / 48 * 2 * math.pi) + 1) / 2  # 0..1
-        self._glow.configure(border_color=theme.shade(C["green"], 0.55 + 0.95 * t))
-        self._glow_job = self.after(80, self._glow_tick)
+        self._glow_phase = (self._glow_phase + 1) % _GLOW_STEPS
+        try:
+            visible = self.state() == "normal"
+        except Exception:                      # window already going away
+            visible = False
+        if visible:
+            t = (math.sin(self._glow_phase / _GLOW_STEPS * 2 * math.pi) + 1) / 2  # 0..1
+            self._glow.configure(border_color=theme.shade(C["green"], 0.55 + 0.95 * t))
+        self._glow_job = self.after(_GLOW_INTERVAL_MS, self._glow_tick)
 
     def _refresh_tagline(self) -> None:
         """Header subtitle showing the selected Service and Accounting systems."""
@@ -301,6 +322,7 @@ class App(ctk.CTk):
         self.customers_tab.refresh()
 
     def refresh_logs(self) -> None:
+        """Repaint the activity log from the DB."""
         self.logs_tab.refresh()
 
     def _on_close(self) -> None:

@@ -9,13 +9,14 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from gui.theme import C, FONT_DATA, FONT_HEAD, FONT_UI, accent_button
+from gui.theme import C, FONT_DATA, FONT_HEAD, accent_button
 
 
 class LogsTab:
     """Scrolling, filterable activity view backed by the DB."""
 
     def __init__(self, parent, app) -> None:
+        """Build the search bar and the scrolling log textbox."""
         self._app = app
         self._db = app.db
 

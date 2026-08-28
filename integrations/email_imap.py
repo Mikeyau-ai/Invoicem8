@@ -19,6 +19,7 @@ from __future__ import annotations
 import email
 import imaplib
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
@@ -29,10 +30,18 @@ from integrations.email_outlook import (
     FIRST_SCAN_LOOKBACK_DAYS,
     EmailMessage,
     OutlookBackend,
+    _ext_of,
     _safe,
 )
 
 log = logging.getLogger(__name__)
+
+#: Messages per header-fetch round trip. Large enough that the first pass is a
+#: handful of commands, small enough to keep the command line sane.
+_HEADER_BATCH = 200
+
+#: Upper bound on how many search hits a single fetch considers (newest first).
+_SEARCH_CAP = 500
 
 #: Friendly presets so users do not have to look up server names.
 IMAP_PRESETS: dict[str, tuple[str, int]] = {
@@ -60,6 +69,7 @@ class ImapBackend(OutlookBackend):
 
     def __init__(self, host: str, port: int, username: str, password: str,
                  folder: str = "INBOX", use_ssl: bool = True) -> None:
+        """Store connection details; nothing is opened until :meth:`fetch`."""
         self._host = (host or "").strip()
         self._port = int(port or 993)
         self._user = (username or "").strip()
@@ -118,8 +128,53 @@ class ImapBackend(OutlookBackend):
         except (TypeError, ValueError, IndexError):
             return -1
 
-    def fetch(self, since, unread_only, allowed_ext):
-        """Return messages carrying attachments that are newer than ``since``."""
+    @staticmethod
+    def _split_fetch(raw) -> dict[bytes, bytes]:
+        """Map sequence number -> payload from a multi-message FETCH response.
+
+        imaplib returns a flat list in which each message contributes a
+        ``(b'<seq> (BODY[...] {<n>}', b'<payload>')`` tuple; the leading
+        sequence number is the only reliable way to match a payload back to the
+        message it came from.
+        """
+        out: dict[bytes, bytes] = {}
+        for part in raw or []:
+            if not isinstance(part, tuple) or len(part) < 2:
+                continue
+            match = re.match(rb"\s*(\d+)", part[0] or b"")
+            if match:
+                out[match.group(1)] = part[1]
+        return out
+
+    def _scan_headers(self, conn, seqs: list[bytes]) -> dict[bytes, object]:
+        """Fetch just the headers for a batch of messages, in few round trips.
+
+        This is the cheap first pass: it costs a few hundred bytes per message
+        instead of the full body plus every attachment, and lets the date and
+        already-processed filters run before anything large is transferred.
+        """
+        found: dict[bytes, object] = {}
+        for start in range(0, len(seqs), _HEADER_BATCH):
+            chunk = seqs[start:start + _HEADER_BATCH]
+            typ, raw = conn.fetch(
+                b",".join(chunk),
+                "(BODY.PEEK[HEADER.FIELDS (DATE MESSAGE-ID SUBJECT FROM)])")
+            if typ != "OK":
+                continue
+            for seq, payload in self._split_fetch(raw).items():
+                try:
+                    found[seq] = email.message_from_bytes(payload)
+                except Exception:
+                    continue
+        return found
+
+    def fetch(self, since, unread_only, allowed_ext, seen_ids=frozenset(),
+              headers_only=False):
+        """Return messages carrying attachments that are newer than ``since``.
+
+        Two passes: headers for everything the server matched, then full bodies
+        only for the messages that survive the date and dedupe filters.
+        """
         floor = since or (datetime.now(timezone.utc)
                           - timedelta(days=FIRST_SCAN_LOOKBACK_DAYS))
         conn = self._connect()
@@ -134,46 +189,63 @@ class ImapBackend(OutlookBackend):
             typ, data = conn.search(None, *criteria)
             if typ != "OK":
                 raise RuntimeError(f"IMAP search failed: {typ}")
-            uids = (data[0] or b"").split()
+            matched = (data[0] or b"").split()
 
-            older = no_attach = 0
-            results: list[EmailMessage] = []
-            for uid in reversed(uids[-500:]):        # newest first, bounded
-                # BODY.PEEK so reading does not flag the message as seen.
-                typ, raw = conn.fetch(uid, "(BODY.PEEK[])")
-                if typ != "OK" or not raw or not raw[0]:
+            # Pass 1 - headers only, newest first, bounded.
+            candidates = list(reversed(matched[-_SEARCH_CAP:]))
+            headers = self._scan_headers(conn, candidates)
+
+            older = already = 0
+            wanted: list[tuple[bytes, str, object]] = []
+            for seq in candidates:
+                head = headers.get(seq)
+                if head is None:
                     continue
-                msg = email.message_from_bytes(raw[0][1])
-
-                received = self._received_at(msg)
+                received = self._received_at(head)
                 if received <= floor:
                     older += 1
                     continue
+                msg_id = (head.get("Message-ID") or f"uid-{seq.decode()}").strip()
+                if msg_id in seen_ids:
+                    already += 1
+                    continue
+                wanted.append((seq, msg_id, received))
 
-                saved = self._save_attachments(msg, uid, allowed_ext)
+            # Pass 2 - full body, only for what survived.
+            no_attach = 0
+            results: list[EmailMessage] = []
+            for seq, msg_id, received in wanted:
+                # BODY.PEEK so reading does not flag the message as seen.
+                typ, raw = conn.fetch(seq, "(BODY.PEEK[])")
+                if typ != "OK" or not raw or not raw[0]:
+                    continue
+                msg = email.message_from_bytes(raw[0][1])
+                saved = self._save_attachments(msg, seq, allowed_ext,
+                                               write=not headers_only)
                 if not saved:
                     no_attach += 1
                     continue
 
                 results.append(EmailMessage(
-                    message_id=(msg.get("Message-ID") or f"uid-{uid.decode()}").strip(),
+                    message_id=msg_id,
                     subject=_decode(msg.get("Subject")),
                     sender=_decode(msg.get("From")),
                     received_at=received,
                     body=self._body_text(msg)[:20000],
-                    attachments=saved,
+                    attachments=[] if headers_only else saved,
                     is_unread=True,
                 ))
 
             self.last_scan = (
                 f"IMAP {self._user} @ {self._host}, folder '{self._folder}' "
-                f"({total} message(s) total). {len(uids)} matched the date search"
+                f"({total} message(s) total). {len(matched)} matched the date search"
                 f"{' (unread only)' if unread_only else ''}; "
                 f"{older} older than the window; "
+                f"{already} already processed; "
                 f"{no_attach} had no usable attachment; "
                 f"{len(results)} queued for processing."
             )
-            if not uids:
+            if not matched:
                 self.last_scan += (" Nothing matched - check the folder name and "
                                    "that the invoice is recent.")
             return results
@@ -211,8 +283,14 @@ class ImapBackend(OutlookBackend):
         return ""
 
     @staticmethod
-    def _save_attachments(msg, uid: bytes, allowed_ext: set[str]) -> list[Path]:
-        """Write file attachments to the cache, one sub-folder per message."""
+    def _save_attachments(msg, uid: bytes, allowed_ext: set[str],
+                          write: bool = True) -> list[Path]:
+        """Write file attachments to the cache, one sub-folder per message.
+
+        With ``write=False`` the matching attachments are still identified (so
+        the caller gets a truthy count) but no bytes reach disk - the
+        headers-only probe used by the "Test mailbox" button.
+        """
         out: list[Path] = []
         digits = "".join(ch for ch in uid.decode(errors="replace") if ch.isdigit())
         bucket = ATTACHMENT_CACHE / f"imap-{digits or '0'}"
@@ -221,8 +299,7 @@ class ImapBackend(OutlookBackend):
             if not filename:
                 continue
             fname = _safe(_decode(filename))
-            ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
-            if allowed_ext and ext not in allowed_ext:
+            if allowed_ext and _ext_of(fname) not in allowed_ext:
                 continue
             try:
                 payload = part.get_payload(decode=True)
@@ -230,8 +307,11 @@ class ImapBackend(OutlookBackend):
                 continue
             if not payload:
                 continue
-            bucket.mkdir(parents=True, exist_ok=True)
             dest = bucket / fname
-            dest.write_bytes(payload)
+            if write:
+                bucket.mkdir(parents=True, exist_ok=True)
+                # Identical bytes already cached: keep the path, skip the write.
+                if not (dest.exists() and dest.stat().st_size == len(payload)):
+                    dest.write_bytes(payload)
             out.append(dest)
         return out

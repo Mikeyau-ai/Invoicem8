@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 
 import customtkinter as ctk
 
@@ -20,19 +21,25 @@ from gui.app import App
 
 
 def _setup_logging() -> None:
-    """File + console logging for diagnostics (separate from the in-app log)."""
+    """File + console logging for diagnostics (separate from the in-app log).
+
+    Rotating, because this is a long-running background app: an unbounded
+    handler would grow the log file for the lifetime of the install.
+    """
     ensure_dirs()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
-            logging.FileHandler(LOG_DIR / "invoicem8.log", encoding="utf-8"),
+            RotatingFileHandler(LOG_DIR / "invoicem8.log", encoding="utf-8",
+                                maxBytes=2_000_000, backupCount=3),
             logging.StreamHandler(sys.stdout),
         ],
     )
 
 
 def main() -> None:
+    """Build the DB/settings/theme and run the Tk event loop."""
     _setup_logging()
     autostart = "--autostart" in sys.argv
 

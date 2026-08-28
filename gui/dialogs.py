@@ -16,6 +16,7 @@ class NewCustomerDialog(ctk.CTkToplevel):
 
     def __init__(self, master, extracted_name: str, service_label: str,
                  accounting_label: str) -> None:
+        """Build the prompt, pre-filled with the extracted customer name."""
         super().__init__(master)
         self.title("New customer detected")
         self.configure(fg_color=C["bg"])
@@ -77,6 +78,7 @@ class NewCustomerDialog(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self._reject)
 
     def _accept(self) -> None:
+        """Validate the form and publish the result, then close."""
         name = self._name.get().strip()
         if not name:
             self._name.configure(border_color=C["red"])
@@ -92,5 +94,6 @@ class NewCustomerDialog(ctk.CTkToplevel):
         self.destroy()
 
     def _reject(self) -> None:
+        """Dismiss without adding a customer."""
         self.result = None
         self.destroy()

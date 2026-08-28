@@ -30,8 +30,14 @@ AUTH_URL = "https://secure.myob.com/oauth2/account/authorize"
 TOKEN_URL = "https://secure.myob.com/oauth2/v1/authorize"
 API_ROOT = "https://api.myob.com/accountright"
 
+#: MYOB embeds the attachment as base64 in the request body, so a very
+#: large file would be held in memory twice over. Refuse past this.
+_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
 
 class MyobProvider(Provider):
+    """Attaches invoice files to an AccountRight supplier bill."""
+
     key = "myob"
     category = "accounting"
     uses_oauth = True
@@ -69,26 +75,31 @@ class MyobProvider(Provider):
             "redirect_uri": self._settings.get("myob.redirect_uri"),
             "grant_type": "authorization_code",
         }
-        r = requests.post(TOKEN_URL, data=data, timeout=30)
+        r = self.http.post(TOKEN_URL, data=data, timeout=30)
         r.raise_for_status()
         self._settings.set("myob.refresh_token", r.json()["refresh_token"])
 
-    def _access_token(self) -> str:
-        """Refresh and return a bearer token."""
+    def _refresh(self) -> tuple[str, int]:
+        """Exchange the stored refresh token for a new bearer token."""
         data = {
             "client_id": self._settings.get("myob.client_id"),
             "client_secret": self._settings.get("myob.client_secret"),
             "refresh_token": self._settings.get("myob.refresh_token"),
             "grant_type": "refresh_token",
         }
-        r = requests.post(TOKEN_URL, data=data, timeout=30)
+        r = self.http.post(TOKEN_URL, data=data, timeout=30)
         r.raise_for_status()
         payload = r.json()
         if payload.get("refresh_token"):
             self._settings.set("myob.refresh_token", payload["refresh_token"])
-        return payload["access_token"]
+        return payload["access_token"], payload.get("expires_in", 1200)
+
+    def _access_token(self) -> str:
+        """A valid bearer token, reused until it is close to expiring."""
+        return self._cached_access_token(self._refresh)
 
     def _headers(self) -> dict:
+        """Bearer + API key + company-file token headers for every call."""
         cf_token = base64.b64encode(
             f"{self._settings.get('myob.cf_username')}:{self._settings.get('myob.cf_password')}".encode()
         ).decode()
@@ -102,12 +113,14 @@ class MyobProvider(Provider):
         }
 
     def _cf_base(self) -> str:
+        """API root scoped to the configured company file."""
         return f"{API_ROOT}/{self._settings.get('myob.company_file_id')}"
 
     # -- provider API -------------------------------------------------
     def test_connection(self) -> UploadResult:
+        """Hit the API root to prove auth and the company file work."""
         try:
-            r = requests.get(f"{API_ROOT}/", headers=self._headers(), timeout=25)
+            r = self.http.get(f"{API_ROOT}/", headers=self._headers(), timeout=25)
             if r.status_code == 200:
                 return UploadResult(True, self.label, "Authenticated with MYOB.")
             return UploadResult(False, self.label, f"HTTP {r.status_code}: {r.text[:200]}")
@@ -133,7 +146,7 @@ class MyobProvider(Provider):
 
             # Locate an existing bill by number, else create a draft.
             flt = requests.utils.quote(f"Number eq '{ctx.invoice_ref}'")
-            find = requests.get(f"{base}/Purchase/Bill/Item?$filter={flt}",
+            find = self.http.get(f"{base}/Purchase/Bill/Item?$filter={flt}",
                                 headers=headers, timeout=25)
             find.raise_for_status()
             items = find.json().get("Items", [])
@@ -152,11 +165,21 @@ class MyobProvider(Provider):
                         "Total": total,
                     }],
                 }
-                created = requests.post(f"{base}/Purchase/Bill/Item",
+                created = self.http.post(f"{base}/Purchase/Bill/Item",
                                         headers=headers, json=draft, timeout=30)
                 created.raise_for_status()
                 bill_uid = created.headers.get("Location", "").rstrip("/").split("/")[-1]
 
+            # MYOB takes the file as base64 inside the JSON body, so it
+            # cannot be streamed. Bound it rather than blowing up on a huge
+            # scan with an opaque memory or HTTP error.
+            size = ctx.file_path.stat().st_size
+            if size > _MAX_ATTACHMENT_BYTES:
+                return UploadResult(
+                    False, self.label,
+                    f"{ctx.file_path.name} is {size / 1e6:.1f} MB; MYOB "
+                    f"attachments must stay under "
+                    f"{_MAX_ATTACHMENT_BYTES / 1e6:.0f} MB.")
             with ctx.file_path.open("rb") as fh:
                 blob = base64.b64encode(fh.read()).decode()
             attach = {
@@ -165,7 +188,7 @@ class MyobProvider(Provider):
                 "FileName": ctx.file_path.name,
                 "FileContentBase64": blob,
             }
-            up = requests.post(f"{base}/Attachment", headers=headers, json=attach, timeout=60)
+            up = self.http.post(f"{base}/Attachment", headers=headers, json=attach, timeout=60)
             up.raise_for_status()
             noun = "credit (negative bill)" if credit else "bill"
             return UploadResult(True, self.label,

@@ -22,6 +22,8 @@ API = "https://quickbooks.api.intuit.com/v3/company"
 
 
 class QuickBooksProvider(Provider):
+    """Uploads invoice files to QuickBooks Online as Attachable records."""
+
     key = "qbo"
     category = "accounting"
     uses_oauth = True
@@ -36,6 +38,7 @@ class QuickBooksProvider(Provider):
     SCOPES = "com.intuit.quickbooks.accounting"
 
     def authorize_interactive(self) -> str:
+        """Open the Intuit consent page. Returns the URL the user visits."""
         params = {
             "client_id": self._settings.get("qbo.client_id"),
             "redirect_uri": self._settings.get("qbo.redirect_uri"),
@@ -48,7 +51,8 @@ class QuickBooksProvider(Provider):
         return url
 
     def exchange_code(self, code: str) -> None:
-        r = requests.post(TOKEN_URL, data={
+        """Swap an auth code for tokens and persist the refresh token."""
+        r = self.http.post(TOKEN_URL, data={
             "grant_type": "authorization_code",
             "code": code.strip(),
             "redirect_uri": self._settings.get("qbo.redirect_uri"),
@@ -58,8 +62,13 @@ class QuickBooksProvider(Provider):
         r.raise_for_status()
         self._settings.set("qbo.refresh_token", r.json()["refresh_token"])
 
-    def _access_token(self) -> str:
-        r = requests.post(TOKEN_URL, data={
+    def _refresh(self) -> tuple[str, int]:
+        """Exchange the stored refresh token for a new access token.
+
+        Intuit rotates the refresh token on each call, so the replacement is
+        persisted here - one more reason not to do this per request.
+        """
+        r = self.http.post(TOKEN_URL, data={
             "grant_type": "refresh_token",
             "refresh_token": self._settings.get("qbo.refresh_token"),
         }, auth=(self._settings.get("qbo.client_id"),
@@ -68,14 +77,20 @@ class QuickBooksProvider(Provider):
         r.raise_for_status()
         payload = r.json()
         self._settings.set("qbo.refresh_token", payload["refresh_token"])
-        return payload["access_token"]
+        return payload["access_token"], payload.get("expires_in", 3600)
+
+    def _access_token(self) -> str:
+        """A valid bearer token, reused until it is close to expiring."""
+        return self._cached_access_token(self._refresh)
 
     def _base(self) -> str:
+        """Company-scoped API root for the configured realm."""
         return f"{API}/{self._settings.get('qbo.realm_id')}"
 
     def test_connection(self) -> UploadResult:
+        """Read the company record to prove the credentials work."""
         try:
-            r = requests.get(
+            r = self.http.get(
                 f"{self._base()}/companyinfo/{self._settings.get('qbo.realm_id')}",
                 headers={"Authorization": f"Bearer {self._access_token()}",
                          "Accept": "application/json"}, timeout=25)
@@ -85,6 +100,7 @@ class QuickBooksProvider(Provider):
             return UploadResult(False, self.label, f"QBO error: {exc}")
 
     def upload_invoice(self, ctx: UploadContext) -> UploadResult:
+        """Post the file as an Attachable with a descriptive note."""
         try:
             token = self._access_token()
             mime = mimetypes.guess_type(ctx.file_path.name)[0] or "application/pdf"
@@ -100,7 +116,7 @@ class QuickBooksProvider(Provider):
                     "file_metadata_01": ("metadata.json", json.dumps(meta), "application/json"),
                     "file_content_01": (ctx.file_path.name, fh.read(), mime),
                 }
-                r = requests.post(f"{self._base()}/upload",
+                r = self.http.post(f"{self._base()}/upload",
                                   headers={"Authorization": f"Bearer {token}",
                                            "Accept": "application/json"},
                                   files=files, timeout=60)

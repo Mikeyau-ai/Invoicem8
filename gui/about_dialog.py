@@ -37,6 +37,7 @@ class AboutWindow(ctk.CTkToplevel):
     """Single-instance About window."""
 
     def __init__(self, master) -> None:
+        """Build the about window and load the bundled changelog."""
         super().__init__(master)
         self.title("About InvoiceM8")
         self.geometry("560x620")

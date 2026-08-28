@@ -10,6 +10,8 @@ from integrations.provider_base import StubProvider
 
 
 class SimproProvider(StubProvider):
+    """simPRO field-service platform (preview)."""
+
     key = "simpro"
     label = "simPRO"
     category = "service"
@@ -23,6 +25,8 @@ class SimproProvider(StubProvider):
 
 
 class ArofloProvider(StubProvider):
+    """AroFlo field-service platform (preview)."""
+
     key = "aroflo"
     label = "AroFlo"
     category = "service"
@@ -34,6 +38,8 @@ class ArofloProvider(StubProvider):
 
 
 class TradifyProvider(StubProvider):
+    """Tradify job-management platform (preview)."""
+
     key = "tradify"
     label = "Tradify"
     category = "service"
@@ -46,6 +52,8 @@ class TradifyProvider(StubProvider):
 
 
 class FergusProvider(StubProvider):
+    """Fergus job-management platform (preview)."""
+
     key = "fergus"
     label = "Fergus"
     category = "service"
@@ -55,6 +63,8 @@ class FergusProvider(StubProvider):
 
 
 class JobberProvider(StubProvider):
+    """Jobber field-service platform (preview)."""
+
     key = "jobber"
     label = "Jobber"
     category = "service"
@@ -68,6 +78,8 @@ class JobberProvider(StubProvider):
 
 
 class ServiceTitanProvider(StubProvider):
+    """ServiceTitan field-service platform (preview)."""
+
     key = "servicetitan"
     label = "ServiceTitan"
     category = "service"
@@ -80,6 +92,8 @@ class ServiceTitanProvider(StubProvider):
 
 
 class HousecallProProvider(StubProvider):
+    """Housecall Pro field-service platform (preview)."""
+
     key = "housecallpro"
     label = "Housecall Pro"
     category = "service"

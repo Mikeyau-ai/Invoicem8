@@ -15,6 +15,7 @@ class OAuthDialog(ctk.CTkToplevel):
     """Guided authorization-code exchange."""
 
     def __init__(self, master, provider_key: str, settings, status_label) -> None:
+        """Build the three-step consent walkthrough for one provider."""
         super().__init__(master)
         self.title("Authorise provider")
         self.configure(fg_color=C["bg"])
@@ -42,6 +43,7 @@ class OAuthDialog(ctk.CTkToplevel):
         self._msg.pack(anchor="w", padx=18)
 
     def _open(self) -> None:
+        """Open the provider consent page in the default browser."""
         try:
             url = self._provider.authorize_interactive()
             self._msg.configure(text="Browser opened. If not, copy the URL from logs.",
@@ -50,6 +52,7 @@ class OAuthDialog(ctk.CTkToplevel):
             self._msg.configure(text=f"Failed: {exc}", text_color=C["red"])
 
     def _exchange(self) -> None:
+        """Swap the pasted code for a refresh token and store it."""
         try:
             self._provider.exchange_code(self._code.get())
             self._msg.configure(text="Refresh token stored.", text_color=C["green"])

@@ -20,6 +20,8 @@ API = "https://api.xero.com/api.xro/2.0"
 
 
 class XeroProvider(Provider):
+    """Files invoices and credit notes as attachments on Xero AP documents."""
+
     key = "xero"
     category = "accounting"
     uses_oauth = True
@@ -34,6 +36,7 @@ class XeroProvider(Provider):
     SCOPES = "offline_access accounting.transactions accounting.attachments accounting.contacts"
 
     def authorize_interactive(self) -> str:
+        """Open the Xero consent page. Returns the URL the user should visit."""
         params = {
             "response_type": "code",
             "client_id": self._settings.get("xero.client_id"),
@@ -46,7 +49,8 @@ class XeroProvider(Provider):
         return url
 
     def exchange_code(self, code: str) -> None:
-        r = requests.post(TOKEN_URL, data={
+        """Swap an auth code for tokens and persist the refresh token."""
+        r = self.http.post(TOKEN_URL, data={
             "grant_type": "authorization_code",
             "code": code.strip(),
             "redirect_uri": self._settings.get("xero.redirect_uri"),
@@ -55,8 +59,13 @@ class XeroProvider(Provider):
         r.raise_for_status()
         self._settings.set("xero.refresh_token", r.json()["refresh_token"])
 
-    def _access_token(self) -> str:
-        r = requests.post(TOKEN_URL, data={
+    def _refresh(self) -> tuple[str, int]:
+        """Exchange the stored refresh token for a new access token.
+
+        Xero rotates the refresh token on every call, so the replacement is
+        persisted here - one more reason not to do this per request.
+        """
+        r = self.http.post(TOKEN_URL, data={
             "grant_type": "refresh_token",
             "refresh_token": self._settings.get("xero.refresh_token"),
         }, auth=(self._settings.get("xero.client_id"),
@@ -64,9 +73,14 @@ class XeroProvider(Provider):
         r.raise_for_status()
         payload = r.json()
         self._settings.set("xero.refresh_token", payload["refresh_token"])
-        return payload["access_token"]
+        return payload["access_token"], payload.get("expires_in", 1800)
+
+    def _access_token(self) -> str:
+        """A valid bearer token, reused until it is close to expiring."""
+        return self._cached_access_token(self._refresh)
 
     def _headers(self) -> dict:
+        """Auth + tenant headers for every Xero API call."""
         return {
             "Authorization": f"Bearer {self._access_token()}",
             "Xero-tenant-id": self._settings.get("xero.tenant_id"),
@@ -74,14 +88,16 @@ class XeroProvider(Provider):
         }
 
     def test_connection(self) -> UploadResult:
+        """Read the organisation record to prove the credentials work."""
         try:
-            r = requests.get(f"{API}/Organisation", headers=self._headers(), timeout=25)
+            r = self.http.get(f"{API}/Organisation", headers=self._headers(), timeout=25)
             return UploadResult(r.ok, self.label,
                                 "Connected to Xero." if r.ok else f"HTTP {r.status_code}")
         except requests.RequestException as exc:
             return UploadResult(False, self.label, f"Xero error: {exc}")
 
     def upload_invoice(self, ctx: UploadContext) -> UploadResult:
+        """Find or draft the matching AP document, then attach the file to it."""
         try:
             headers = self._headers()
             acct_code = self._settings.get("xero.default_account_code", "400")
@@ -90,7 +106,7 @@ class XeroProvider(Provider):
                 # Accounts-payable credit note (ACCPAYCREDIT).
                 where = requests.utils.quote(
                     f'Type=="ACCPAYCREDIT" AND CreditNoteNumber=="{ctx.invoice_ref}"')
-                found = requests.get(f"{API}/CreditNotes?where={where}", headers=headers, timeout=25)
+                found = self.http.get(f"{API}/CreditNotes?where={where}", headers=headers, timeout=25)
                 found.raise_for_status()
                 existing = found.json().get("CreditNotes", [])
                 if existing:
@@ -109,7 +125,7 @@ class XeroProvider(Provider):
                         }],
                         "Status": "DRAFT",
                     }]}
-                    made = requests.post(f"{API}/CreditNotes", headers=headers, json=body, timeout=30)
+                    made = self.http.post(f"{API}/CreditNotes", headers=headers, json=body, timeout=30)
                     made.raise_for_status()
                     doc_id = made.json()["CreditNotes"][0]["CreditNoteID"]
                 attach_url = f"{API}/CreditNotes/{doc_id}/Attachments/{ctx.file_path.name}"
@@ -117,7 +133,7 @@ class XeroProvider(Provider):
             else:
                 where = requests.utils.quote(
                     f'Type=="ACCPAY" AND InvoiceNumber=="{ctx.invoice_ref}"')
-                found = requests.get(f"{API}/Invoices?where={where}", headers=headers, timeout=25)
+                found = self.http.get(f"{API}/Invoices?where={where}", headers=headers, timeout=25)
                 found.raise_for_status()
                 invoices = found.json().get("Invoices", [])
                 if invoices:
@@ -136,16 +152,18 @@ class XeroProvider(Provider):
                         }],
                         "Status": "DRAFT",
                     }]}
-                    made = requests.post(f"{API}/Invoices", headers=headers, json=body, timeout=30)
+                    made = self.http.post(f"{API}/Invoices", headers=headers, json=body, timeout=30)
                     made.raise_for_status()
                     doc_id = made.json()["Invoices"][0]["InvoiceID"]
                 attach_url = f"{API}/Invoices/{doc_id}/Attachments/{ctx.file_path.name}"
                 noun = "bill"
 
             mime = mimetypes.guess_type(ctx.file_path.name)[0] or "application/pdf"
+            # Hand requests the file object so the bytes are streamed
+            # rather than materialised in memory.
             with ctx.file_path.open("rb") as fh:
-                up = requests.put(attach_url, headers={**headers, "Content-Type": mime},
-                                  data=fh.read(), timeout=60)
+                up = self.http.put(attach_url, headers={**headers, "Content-Type": mime},
+                                   data=fh, timeout=60)
             up.raise_for_status()
             return UploadResult(True, self.label,
                                 f"Attached {ctx.file_path.name} to Xero {noun} {ctx.invoice_ref}.",

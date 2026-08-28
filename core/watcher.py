@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 
 from dateutil import parser as dtparse
 
+from config import CACHE_RETENTION_DAYS
 from core.database import Database
+from core.housekeeping import prune_attachment_cache
 from core.parser_ai import InvoiceParser
 from core.router import Router
 from integrations.email_outlook import build_backend
@@ -31,6 +33,7 @@ class Watcher:
 
     def __init__(self, db: Database, settings, on_new_customer=None,
                  emit=None, on_status=None) -> None:
+        """Build the router/parser and prepare the (not yet started) thread."""
         self._db = db
         self._settings = settings
         self._emit = emit or (lambda **_: None)
@@ -44,9 +47,11 @@ class Watcher:
     # -- lifecycle ---------------------------------------------------
     @property
     def running(self) -> bool:
+        """True while the polling thread is alive."""
         return self._thread is not None and self._thread.is_alive()
 
     def start(self) -> None:
+        """Launch the polling thread. Idempotent."""
         if self.running:
             return
         self._stop.clear()
@@ -76,6 +81,12 @@ class Watcher:
 
     # -- main loop -------------------------------------------------
     def _run(self) -> None:
+        """Thread body: startup back-check, then poll until stopped."""
+        try:
+            self._housekeeping()
+        except Exception:
+            log.exception("Housekeeping failed")   # never block the first scan
+
         try:
             self._back_check()
         except Exception as exc:
@@ -110,11 +121,33 @@ class Watcher:
                    message="Startup back-check for missed invoices...")
         self._poll(since=self._resume_point(), unread_only=False, back_check=True)
 
+    def _housekeeping(self) -> None:
+        """Bounded-growth maintenance: prune the attachment cache and the log.
+
+        Runs once when the thread starts. Both stores otherwise grow forever -
+        the cache gains a folder per processed email, the activity log a row
+        per emitted event.
+        """
+        removed = prune_attachment_cache(
+            keep_days=self._settings.get_int("watcher.cache_days", CACHE_RETENTION_DAYS),
+            protected=self._db.unresolved_error_paths() | self._db.pending_paths(),
+        )
+        trimmed = self._db.trim_activity_log()
+        if removed or trimmed:
+            self._emit(level="INFO", action="cleanup",
+                       message=f"Housekeeping: removed {removed} cached attachment "
+                               f"folder(s), trimmed {trimmed} old log row(s).")
+
     def _poll(self, since, unread_only: bool, back_check: bool = False) -> None:
         """One inbox scan -> parse -> route cycle."""
         backend = build_backend(self._settings)
-        allowed_ext = set()  # per-customer filtering happens in the router
-        messages = backend.fetch(since=since, unread_only=unread_only, allowed_ext=allowed_ext)
+        # Prefilter on the mailbox side so attachments no customer wants are
+        # never transferred; per-customer filtering still happens in the router.
+        allowed_ext = self._db.all_file_types()
+        # Already-handled mail is skipped before its attachments are fetched.
+        seen_ids = self._db.recent_processed_ids()
+        messages = backend.fetch(since=since, unread_only=unread_only,
+                                 allowed_ext=allowed_ext, seen_ids=seen_ids)
         if not messages:
             detail = getattr(backend, "last_scan", "") or "No new emails."
             self._emit(level="INFO", action="poll",

@@ -14,6 +14,7 @@ class UpdateDialog(ctk.CTkToplevel):
     """Offers an update; on 'Update now' downloads it and relaunches."""
 
     def __init__(self, master, info: updater.UpdateInfo) -> None:
+        """Build the offer dialog for one available release."""
         super().__init__(master)
         self._master = master
         self._info = info
@@ -57,10 +58,12 @@ class UpdateDialog(ctk.CTkToplevel):
 
     # -- actions --------------------------------------------------
     def _skip(self) -> None:
+        """Remember this version as declined so it is not re-offered."""
         updater.skip_version(self._info.version)
         self.destroy()
 
     def _on_close(self) -> None:
+        """Cancel any in-flight download and close."""
         self._cancel = True
         self.destroy()
 
@@ -72,7 +75,9 @@ class UpdateDialog(ctk.CTkToplevel):
         threading.Thread(target=self._download_worker, daemon=True).start()
 
     def _download_worker(self) -> None:
+        """Worker thread: download the exe, reporting progress to Tk."""
         def progress(done: int, total: int) -> None:
+            """Update the progress bar and byte counter on the Tk thread."""
             frac = (done / total) if total else 0
             self.after(0, lambda: (self._bar.set(frac),
                                    self._status.configure(
@@ -84,6 +89,7 @@ class UpdateDialog(ctk.CTkToplevel):
         self.after(0, lambda: self._finish(path))
 
     def _finish(self, path) -> None:
+        """Hand off to the external swap script, or report the failure."""
         if not path:
             self._status.configure(text="Download failed - try again later.",
                                    text_color=C["red"])

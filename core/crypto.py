@@ -61,6 +61,7 @@ class SecretBox:
     """Thin wrapper around Fernet for encrypting/decrypting setting values."""
 
     def __init__(self) -> None:
+        """Load (or mint) the master key and prepare the Fernet cipher."""
         #: number of stored secrets that could not be decrypted this session
         self.decrypt_failures = 0
         self._fernet = Fernet(_load_or_create_key())

@@ -15,6 +15,7 @@ class ErrorsTab:
     """Manual remediation view for the error log."""
 
     def __init__(self, parent, app) -> None:
+        """Build the toolbar and the scrolling list of error cards."""
         self._app = app
         self._db = app.db
         self._router = Router(app.db, app.settings, emit=app.emit_event)
@@ -35,6 +36,7 @@ class ErrorsTab:
         self.refresh()
 
     def refresh(self) -> None:
+        """Rebuild the card list from the error log."""
         for w in self._list.winfo_children():
             w.destroy()
         rows = self._db.list_errors(include_resolved=bool(self._show_resolved.get()))
@@ -65,6 +67,7 @@ class ErrorsTab:
                               colour=C["btn_off"], width=90).pack(side="left")
 
     def _retry(self, row) -> None:
+        """Re-run one failed upload from its stored payload."""
         self._db.bump_error_retry(row["id"])
         ok = False
         try:
@@ -78,5 +81,6 @@ class ErrorsTab:
         self._app.refresh_logs()
 
     def _dismiss(self, row) -> None:
+        """Mark one error handled without retrying it."""
         self._db.mark_error_resolved(row["id"])
         self.refresh()

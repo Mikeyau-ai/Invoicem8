@@ -25,6 +25,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
     """Shows the device code and waits for the sign-in to complete."""
 
     def __init__(self, master, settings, on_done=None) -> None:
+        """Build the window and immediately request a device code."""
         super().__init__(master)
         self._settings = settings
         self._on_done = on_done
@@ -85,6 +86,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
         self._status.configure(state="disabled")
 
     def _copy(self) -> None:
+        """Put the device code on the clipboard."""
         if not self._code:
             return
         try:
@@ -119,6 +121,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
                       f"enter {self._code}.", C["yellow"])
 
     def _close(self) -> None:
+        """Mark the dialog closed so the poller stops, then destroy it."""
         self._closed = True
         self.destroy()
 
@@ -180,6 +183,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
         # thread-safe and can be dropped, which would leave this window stuck
         # on "Waiting..." forever.
         def work() -> None:
+            """Worker thread: block on the sign-in, record the outcome."""
             try:
                 who = complete_device_login(self._settings, flow, app, cache)
                 log.info("Graph sign-in succeeded for %s", who)
@@ -204,6 +208,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
         self._finish(msg, colour)
 
     def _finish(self, msg: str, colour: str) -> None:
+        """Show the final outcome and notify the Settings tab."""
         if self._closed:
             return
         self._say(msg, colour)

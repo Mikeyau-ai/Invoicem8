@@ -15,6 +15,7 @@ class HelpPopup(ctk.CTkToplevel):
     """Transient help bubble anchored near the widget that opened it."""
 
     def __init__(self, master, title: str, text: str) -> None:
+        """Build the bubble and position it at the mouse pointer."""
         super().__init__(master)
         self.overrideredirect(True)                     # no title bar
         self.configure(fg_color=C["border"])
@@ -44,6 +45,7 @@ class HelpPopup(ctk.CTkToplevel):
         self.after(60, self.focus_force)
 
     def _maybe_close(self) -> None:
+        """Close once focus has genuinely moved to another window."""
         if self.focus_get() is None:
             self.destroy()
 
@@ -52,6 +54,7 @@ class GuideWindow(ctk.CTkToplevel):
     """Full 'where do I get these keys' guide for one or more sections."""
 
     def __init__(self, master, sections: list[tuple[str, str]]) -> None:
+        """Render one scrollable card per guide section."""
         super().__init__(master)
         self.title("InvoiceM8 - Setup guide")
         self.geometry("640x680")

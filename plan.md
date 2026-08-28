@@ -1,7 +1,37 @@
 # InvoiceM8 - Efficiency & Annotation Review
 
-Findings from a full read of the ~6,000-line source tree (2026-08-28). Nothing
-here is implemented yet; this file is the work queue.
+Findings from a full read of the ~6,000-line source tree (2026-08-28).
+
+## Status: implemented in 1.0.30
+
+Every numbered item below is done except the three explicitly marked
+"noted only" (2.5, 2.6 and the `_save_state` bullet in section 7), which the
+review itself concluded needed no change. Verified by three smoke-test suites
+covering the database layer, the token cache, the router, the Graph fetch and
+the watcher wiring, plus a launch check.
+
+Two things surfaced during implementation that were **not** in the original
+review:
+
+* **Fixed - queued invoices were never replayed.** `add_pending` named every
+  column in its INSERT, so an omitted `status` was written as `''` rather than
+  taking the column default. `list_pending("pending_new_customer")` therefore
+  never matched anything, and the "add this customer, now route their waiting
+  invoices" step silently did nothing. Fixed in `core/database.py`; the new
+  cache sweep also depends on that status to know which files to protect.
+* **Not changed - one email yields one document reference.** The duplicate
+  guard treats customer + reference + doc type as the document identity, and
+  the parser extracts a single reference per email, so an email carrying two
+  *different* invoice PDFs uploads only the first (the second is logged as a
+  duplicate). This is the existing documented rule, not a regression, but it
+  is a real limitation. Changing it means either parsing per attachment or
+  including the file name in the identity - a design call, so it is left
+  alone.
+
+The sections below are kept as written, as the record of why each change was
+made.
+
+---
 
 Each item lists **where**, **why it costs**, and the **proposed fix**. Severity:
 

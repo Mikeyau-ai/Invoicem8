@@ -9,6 +9,8 @@ from integrations.provider_base import StubProvider
 
 
 class ReckonProvider(StubProvider):
+    """Reckon accounting platform (preview)."""
+
     key = "reckon"
     label = "Reckon"
     category = "accounting"
@@ -23,6 +25,8 @@ class ReckonProvider(StubProvider):
 
 
 class SageProvider(StubProvider):
+    """Sage Business Cloud accounting platform (preview)."""
+
     key = "sage"
     label = "Sage Business Cloud"
     category = "accounting"
@@ -36,6 +40,8 @@ class SageProvider(StubProvider):
 
 
 class FreshBooksProvider(StubProvider):
+    """FreshBooks accounting platform (preview)."""
+
     key = "freshbooks"
     label = "FreshBooks"
     category = "accounting"

@@ -11,11 +11,13 @@ stored values (switching back reveals them again).
 """
 from __future__ import annotations
 
+import threading
+
 import customtkinter as ctk
 
 from core import startup as win_startup
 from gui.help_content import FIELD_HELP, SETUP_GUIDES
-from core.parser_ai import AI_PROVIDERS
+from core.parser_ai import AI_PROVIDERS, test_ai_provider
 from gui.help_dialog import GuideWindow, HelpPopup
 from gui.theme import C, FONT_HEAD, FONT_UI, accent_button
 from integrations.email_outlook import build_backend
@@ -57,21 +59,33 @@ class _StatusProxy:
     rest of this module already calls on the old status label."""
 
     def __init__(self, box) -> None:
+        """Wrap one textbox so it can stand in for a status label."""
         self._box = box
 
     def configure(self, text: str = "", text_color: str | None = None, **_kw) -> None:
-        self._box.configure(state="normal")
-        self._box.delete("1.0", "end")
-        self._box.insert("1.0", text)
-        if text_color:
-            self._box.configure(text_color=text_color)
-        self._box.configure(state="disabled")
+        """Replace the box contents, optionally recolouring it.
+
+        Silently does nothing once the widget is gone - a background test can
+        still report back after its Settings window has been closed.
+        """
+        try:
+            if not self._box.winfo_exists():
+                return
+            self._box.configure(state="normal")
+            self._box.delete("1.0", "end")
+            self._box.insert("1.0", text)
+            if text_color:
+                self._box.configure(text_color=text_color)
+            self._box.configure(state="disabled")
+        except Exception:
+            pass
 
 
 class SettingsTab:
     """Builds and manages the Settings tab widgets."""
 
     def __init__(self, parent, app) -> None:
+        """Build the scrolling form plus its pinned action footer."""
         self._app = app
         self._settings = app.settings
         self._fields: dict[str, ctk.CTkEntry] = {}
@@ -105,6 +119,7 @@ class SettingsTab:
 
     # -- static: deployment selectors ---------------------------
     def _build_deployment(self) -> None:
+        """The three provider dropdowns that drive every dynamic section."""
         self._header(self.frame, "Deployment")
         self._service = self._dropdown(
             self.frame, "Service system",
@@ -117,6 +132,7 @@ class SettingsTab:
             [m["label"] for m in AI_PROVIDERS.values()], self._render)
 
     def _build_watcher(self) -> None:
+        """Poll interval, cache retention and the watcher toggles."""
         self._header(self.frame, "Watcher")
         wrap = ctk.CTkFrame(self.frame, fg_color=C["bg"])
         wrap.pack(fill="x", padx=6, pady=3)
@@ -124,6 +140,17 @@ class SettingsTab:
                      text_color=C["text"], width=250, anchor="w").pack(side="left")
         self._poll = ctk.CTkEntry(wrap, width=80)
         self._poll.pack(side="left")
+
+        cache_row = ctk.CTkFrame(self.frame, fg_color=C["bg"])
+        cache_row.pack(fill="x", padx=6, pady=3)
+        ctk.CTkLabel(cache_row, text="Keep cached attachments (days)", font=FONT_UI,
+                     text_color=C["text"], width=250, anchor="w").pack(side="left")
+        self._cache_days = ctk.CTkEntry(cache_row, width=80)
+        self._cache_days.pack(side="left")
+        self._note(self.frame,
+                   "Downloaded attachments are kept this long so a failed upload "
+                   "can still be retried, then deleted. 0 disables the cleanup.")
+
         self._unread_only = ctk.CTkSwitch(
             self.frame,
             text="Only process UNREAD emails  (off = every invoice since the last check)")
@@ -134,6 +161,7 @@ class SettingsTab:
         self._run_startup.pack(anchor="w", padx=6, pady=4)
 
     def _build_updates(self) -> None:
+        """Version line, auto-update toggle and the manual check button."""
         from core import updater
         from version import APP_VERSION
 
@@ -162,6 +190,7 @@ class SettingsTab:
         accent_button(ctk, bar, "Test service", self._test_service, colour=C["blue"]).pack(side="left", padx=8)
         accent_button(ctk, bar, "Test accounting", self._test_accounting, colour=C["blue"]).pack(side="left")
         accent_button(ctk, bar, "Test mailbox", self._test_outlook, colour=C["blue"]).pack(side="left", padx=8)
+        accent_button(ctk, bar, "Test AI", self._test_ai, colour=C["blue"]).pack(side="left")
         accent_button(ctk, bar, "Authorise OAuth", self._oauth, colour=C["purple"]).pack(side="left", padx=(8, 0))
         accent_button(ctk, bar, "Setup guide (all)", self._open_full_guide, colour=C["btn_off"]).pack(side="left", padx=8)
 
@@ -201,6 +230,7 @@ class SettingsTab:
         ).pack(side="left", padx=(6, 0))
 
     def _dropdown(self, parent, label: str, values: list[str], on_change) -> ctk.CTkOptionMenu:
+        """Labelled option menu that re-renders the form when changed."""
         wrap = ctk.CTkFrame(parent, fg_color=C["bg"])
         wrap.pack(fill="x", padx=6, pady=3)
         ctk.CTkLabel(wrap, text=label, font=FONT_UI, text_color=C["text"],
@@ -210,6 +240,7 @@ class SettingsTab:
         return menu
 
     def _row(self, parent, key: str, label: str, secret: bool) -> None:
+        """One labelled credential entry, pre-filled from settings."""
         wrap = ctk.CTkFrame(parent, fg_color=C["bg"])
         wrap.pack(fill="x", padx=6, pady=3)
         ctk.CTkLabel(wrap, text=label, font=FONT_UI, text_color=C["text"],
@@ -221,6 +252,7 @@ class SettingsTab:
         self._fields[key] = entry
 
     def _note(self, parent, text: str) -> None:
+        """Dim explanatory paragraph under a field or section."""
         ctk.CTkLabel(parent, text=text, font=FONT_UI, text_color=C["dim"],
                      anchor="w", justify="left", wraplength=640).pack(anchor="w", padx=6, pady=(0, 4))
 
@@ -254,6 +286,7 @@ class SettingsTab:
         menu.pack(side="left")
 
         def apply_preset() -> None:
+            """Fill the host/port fields from the chosen preset."""
             name = menu.get()
             host, port = IMAP_PRESETS.get(name, ("", 993))
             self._settings.set("imap.preset", name)
@@ -298,6 +331,7 @@ class SettingsTab:
         GraphSignInDialog(self._app, self._settings, on_done=self._render)
 
     def _graph_sign_out(self) -> None:
+        """Forget the cached Microsoft tokens and re-render."""
         from integrations.graph_auth import sign_out
 
         sign_out(self._settings)
@@ -396,6 +430,8 @@ class SettingsTab:
         self._ai_provider.set(AI_PROVIDERS.get(ai_prov, AI_PROVIDERS["gemini"])["label"])
         self._poll.delete(0, "end")
         self._poll.insert(0, self._settings.get("watcher.poll_minutes", "5"))
+        self._cache_days.delete(0, "end")
+        self._cache_days.insert(0, self._settings.get("watcher.cache_days", "30"))
         (self._unread_only.select if self._settings.get_bool("watcher.unread_only") else self._unread_only.deselect)()
         (self._autostart.select if self._settings.get_bool("watcher.autostart") else self._autostart.deselect)()
         (self._run_startup.select if win_startup.is_enabled() else self._run_startup.deselect)()
@@ -428,6 +464,7 @@ class SettingsTab:
             text_color=C["red"])
 
     def _save(self) -> None:
+        """Write every visible field back to the settings store."""
         for key, entry in self._fields.items():
             self._settings.set(key, entry.get())
         self._settings.set("service.provider",
@@ -437,6 +474,7 @@ class SettingsTab:
         self._settings.set("ai.provider", self._ai_key())
         self._settings.set("outlook.backend", self._outlook_backend.get())
         self._settings.set("watcher.poll_minutes", self._poll.get() or "5")
+        self._settings.set("watcher.cache_days", self._cache_days.get() or "30")
         self._settings.set("watcher.unread_only", "1" if self._unread_only.get() else "0")
         self._settings.set("watcher.autostart", "1" if self._autostart.get() else "0")
         try:
@@ -448,28 +486,85 @@ class SettingsTab:
         self._status.configure(text="Settings saved.", text_color=C["green"])
 
     # -- tests / oauth --------------------------------------
+    def _run_test(self, busy: str, work) -> None:
+        """Run one connection test off the Tk thread and report the result.
+
+        ``work`` is called on a worker and returns ``(text, colour)``. Doing
+        this inline used to freeze the whole window for the duration of the
+        call - worst with the mailbox test, which talks to a remote server.
+        """
+        self._status.configure(text=busy, text_color=C["dim"])
+
+        def worker() -> None:
+            """Worker thread: run the check, then marshal back to Tk."""
+            try:
+                text, colour = work()
+            except Exception as exc:
+                text, colour = f"{exc}", C["red"]
+            self._app.after(0, lambda: self._status.configure(text=text,
+                                                              text_color=colour))
+
+        threading.Thread(target=worker, daemon=True,
+                         name="InvoiceM8-SettingsTest").start()
+
     def _test_service(self) -> None:
+        """Check the selected Service system's credentials against its API."""
         self._save()
-        res = build_provider(self._settings.get("service.provider"), self._settings).test_connection()
-        self._status.configure(text=res.detail, text_color=C["green"] if res.ok else C["red"])
+        key = self._settings.get("service.provider")
+
+        def work():
+            """Worker: call the provider's own connection check."""
+            res = build_provider(key, self._settings).test_connection()
+            return res.detail, C["green"] if res.ok else C["red"]
+
+        self._run_test("Testing the service system...", work)
 
     def _test_accounting(self) -> None:
+        """Check the selected Accounting system's credentials against its API."""
         self._save()
-        res = build_provider(self._settings.get("accounting.provider"), self._settings).test_connection()
-        self._status.configure(text=res.detail, text_color=C["green"] if res.ok else C["red"])
+        key = self._settings.get("accounting.provider")
+
+        def work():
+            """Worker: call the provider's own connection check."""
+            res = build_provider(key, self._settings).test_connection()
+            return res.detail, C["green"] if res.ok else C["red"]
+
+        self._run_test("Testing the accounting system...", work)
 
     def _test_outlook(self) -> None:
+        """Probe the mailbox and report what a real scan would have found.
+
+        Runs headers-only: it identifies matching messages without downloading
+        or writing a single attachment, so the test is cheap and leaves nothing
+        behind in the cache.
+        """
         self._save()
-        try:
+        unread_only = self._unread_only.get() == 1
+
+        def work():
+            """Worker: identify matching mail without downloading anything."""
             backend = build_backend(self._settings)
-            msgs = backend.fetch(since=None, unread_only=self._unread_only.get() == 1,
-                                 allowed_ext=set())
+            msgs = backend.fetch(since=None, unread_only=unread_only,
+                                 allowed_ext=set(), headers_only=True)
             detail = getattr(backend, "last_scan", "") or f"{len(msgs)} message(s) found."
-            self._status.configure(
-                text=f"Mailbox OK - {detail}",
-                text_color=C["green"] if msgs else C["yellow"])
-        except Exception as exc:
-            self._status.configure(text=f"Mailbox error: {exc}", text_color=C["red"])
+            return f"Mailbox OK - {detail}", C["green"] if msgs else C["yellow"]
+
+        self._run_test("Testing the mailbox connection...", work)
+
+    def _test_ai(self) -> None:
+        """Round-trip a synthetic invoice through the configured AI provider.
+
+        Proves the whole extraction path - key, endpoint, model name and
+        JSON-mode support - rather than merely that the host is reachable.
+        """
+        self._save()
+
+        def work():
+            """Worker: send the synthetic invoice and grade the reply."""
+            ok, detail = test_ai_provider(self._settings)
+            return detail, C["green"] if ok else C["red"]
+
+        self._run_test("Sending a test invoice to the AI provider...", work)
 
     def _open_full_guide(self) -> None:
         """Setup guide covering every currently-selected section."""
@@ -484,6 +579,7 @@ class SettingsTab:
         GuideWindow(self._app, sections)
 
     def _oauth(self) -> None:
+        """Launch the OAuth consent dialog for whichever provider uses it."""
         self._save()
         from gui.oauth_dialog import OAuthDialog
         for key in (self._settings.get("service.provider"),

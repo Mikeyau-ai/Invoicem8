@@ -81,12 +81,18 @@ class ParseResult:
     source: str = "regex"
 
     def as_dict(self) -> dict:
+        """Plain-dict form, used for the retry payload snapshot."""
         return asdict(self)
 
 
 # --------------------------------------------------------------------------
 # Attachment text extraction
 # --------------------------------------------------------------------------
+#: Extensions :func:`extract_text` can actually read. Anything else (images,
+#: archives) would only ever return an empty string, so it is never opened.
+_TEXT_EXTRACTABLE = {"pdf", "docx", "csv", "txt"}
+
+
 def extract_text(path: Path, limit: int = 12000) -> str:
     """Best-effort plain-text extraction from a single attachment."""
     ext = path.suffix.lower().lstrip(".")
@@ -323,35 +329,99 @@ def _regex_fallback(subject: str, body: str, attachment: str,
     )
 
 
+def _ai_config(settings) -> tuple[str, dict, str, str, str]:
+    """Resolve the configured AI provider into (key_name, meta, model, api_key, base_url)."""
+    provider = settings.get("ai.provider", "gemini")
+    meta = AI_PROVIDERS.get(provider, AI_PROVIDERS["gemini"])
+    return (provider, meta,
+            settings.get("ai.model", ""),
+            settings.get(meta["key_setting"]),
+            settings.get("ai.compat_base_url"))
+
+
+def _call_provider(provider: str, api_key: str, model: str, prompt: str,
+                   base_url: str = "") -> str:
+    """Send one prompt to whichever provider is configured; return raw text."""
+    if provider == "openai":
+        return _call_openai_chat(api_key, model, prompt)
+    if provider == "openai_compatible":
+        return _call_openai_chat(api_key, model, prompt, base_url)
+    if provider == "anthropic":
+        return _call_anthropic(api_key, model, prompt)
+    return _call_gemini(api_key, model, prompt)
+
+
+# A miniature invoice used by the Settings "Test AI" button. Exercising the
+# real prompt means the test proves the whole path - key, endpoint, model name
+# and JSON-mode support - not merely that the host answers.
+_TEST_SUBJECT = "Invoice INV-1042 for Acme Pty Ltd"
+_TEST_BODY = ("Bill to: Acme Pty Ltd\n"
+              "Job #10160\n"
+              "Invoice number: INV-1042\n"
+              "Total incl GST: $250.00\n")
+
+
+def test_ai_provider(settings) -> tuple[bool, str]:
+    """Round-trip a small synthetic invoice through the configured AI provider.
+
+    Returns ``(ok, detail)`` for direct display in the Settings status box.
+    """
+    provider, meta, model, api_key, base_url = _ai_config(settings)
+    label = meta["label"]
+    shown_model = model or meta["default_model"] or "server default"
+
+    if meta["needs_key"] and not api_key:
+        return False, (f"{label}: no API key saved. Enter the key above and "
+                       f"click Save settings first.")
+    if meta["needs_base_url"] and not base_url:
+        return False, (f"{label}: no base URL set. It must point at an "
+                       f"OpenAI-compatible endpoint ending in /v1.")
+
+    prompt = _PROMPT.format(subject=_TEST_SUBJECT, body=_TEST_BODY,
+                            attachment="", filenames="INV-1042_Acme.pdf")
+    try:
+        raw = _call_provider(provider, api_key, model, prompt, base_url)
+    except Exception as exc:
+        return False, f"{label} ({shown_model}) failed: {exc}"
+
+    data = _coerce_json(raw)
+    if not data:
+        return False, (f"{label} ({shown_model}) replied, but not with usable "
+                       f"JSON: {raw[:200]!r}")
+    got = str(data.get("customer_name", "")).strip()
+    if "acme" not in got.lower():
+        return True, (f"{label} ({shown_model}) works, but extracted customer "
+                      f"'{got or '(blank)'}' from the test invoice instead of "
+                      f"'Acme Pty Ltd' - a weaker model may misread real ones.")
+    return True, (f"{label} ({shown_model}) OK - test invoice parsed as "
+                  f"customer '{got}', job "
+                  f"'{str(data.get('job_number', '')).strip() or '-'}', ref "
+                  f"'{str(data.get('invoice_ref', '')).strip() or '-'}'.")
+
+
 class InvoiceParser:
     """Chooses a provider based on settings and produces a :class:`ParseResult`."""
 
     def __init__(self, settings) -> None:
+        """Bind the parser to the settings store holding the AI config."""
         self._settings = settings
 
     def parse(self, subject: str, body: str, attachments: list[Path]) -> ParseResult:
         """Run extraction over one email + its attachments."""
-        attachment_text = "\n\n".join(extract_text(p) for p in attachments)[:12000]
+        # Only bother extracting from formats the extractor actually handles -
+        # images and unknown types always come back empty.
+        attachment_text = "\n\n".join(
+            extract_text(p) for p in attachments
+            if p.suffix.lower().lstrip(".") in _TEXT_EXTRACTABLE)[:12000]
         filenames = "\n".join(p.name for p in attachments)
-        provider = self._settings.get("ai.provider", "gemini")
-        meta = AI_PROVIDERS.get(provider, AI_PROVIDERS["gemini"])
-        model = self._settings.get("ai.model", "")
-        key = self._settings.get(meta["key_setting"])
-        base_url = self._settings.get("ai.compat_base_url")
+        provider, meta, model, key, base_url = _ai_config(self._settings)
 
         # Local / compatible servers may not need a key; everyone else does.
         if key or not meta["needs_key"]:
             prompt = _PROMPT.format(subject=subject, body=body[:6000],
                                     attachment=attachment_text, filenames=filenames)
             try:
-                if provider == "openai":
-                    raw = _call_openai_chat(key, model, prompt)
-                elif provider == "openai_compatible":
-                    raw = _call_openai_chat(key, model, prompt, base_url)
-                elif provider == "anthropic":
-                    raw = _call_anthropic(key, model, prompt)
-                else:
-                    raw = _call_gemini(key, model, prompt)
+                raw = _call_provider(provider, key, model, prompt, base_url)
                 data = _coerce_json(raw)
                 if data:
                     return ParseResult(

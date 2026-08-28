@@ -52,6 +52,7 @@ def changelog(version: str) -> str:
 
 
 def main() -> int:
+    """Publish the built exe as a GitHub release. Returns a shell exit code."""
     if not EXE.exists():
         print(f"  {EXE} not found - build first (build.bat / PyInstaller).")
         return 1
