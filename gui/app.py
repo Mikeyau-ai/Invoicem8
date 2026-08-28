@@ -125,7 +125,11 @@ class App(ctk.CTk):
             return
         win = ctk.CTkToplevel(self)
         win.title("InvoiceM8 - Settings")
-        win.geometry("820x780")
+        # Height is capped to the screen so the pinned action footer is always
+        # on-screen, even on a 768px-tall laptop display.
+        h = min(820, max(560, self.winfo_screenheight() - 120))
+        win.geometry(f"860x{h}")
+        win.minsize(700, 480)
         win.configure(fg_color=C["bg"])
         theme.dark_titlebar(win)
         self._settings_win = win

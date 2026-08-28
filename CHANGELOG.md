@@ -3,6 +3,17 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.13
+- Settings: the action buttons (Save, Test service, Test accounting, Test
+  Outlook, Authorise OAuth, Setup guide) and the status box are now pinned in
+  a fixed footer instead of living at the bottom of the scrolling form, so
+  they are always reachable no matter how long the form gets.
+- The status area is a scrollable, selectable text box - long diagnostics wrap
+  and can be copied. This also removes a resize feedback loop introduced in
+  1.0.12 that could stop the Settings window scrolling.
+- Settings window height adapts to the screen (and has a minimum size), so the
+  footer is on-screen on smaller laptop displays.
+
 ## 1.0.12
 - Settings status line now word-wraps and grows with the window, so long
   diagnostics (Test Outlook, connection errors) are fully readable instead of

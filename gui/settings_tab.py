@@ -41,6 +41,22 @@ OUTLOOK_BY_BACKEND = {
 }
 
 
+class _StatusProxy:
+    """Gives a CTkTextbox the ``.configure(text=..., text_color=...)`` API the
+    rest of this module already calls on the old status label."""
+
+    def __init__(self, box) -> None:
+        self._box = box
+
+    def configure(self, text: str = "", text_color: str | None = None, **_kw) -> None:
+        self._box.configure(state="normal")
+        self._box.delete("1.0", "end")
+        self._box.insert("1.0", text)
+        if text_color:
+            self._box.configure(text_color=text_color)
+        self._box.configure(state="disabled")
+
+
 class SettingsTab:
     """Builds and manages the Settings tab widgets."""
 
@@ -49,8 +65,15 @@ class SettingsTab:
         self._settings = app.settings
         self._fields: dict[str, ctk.CTkEntry] = {}
 
-        self.frame = ctk.CTkScrollableFrame(parent, fg_color=C["bg"])
-        self.frame.pack(fill="both", expand=True)
+        # Root splits into a fixed footer (always-visible action bar + status)
+        # and the scrolling body above it, so the buttons can never be pushed
+        # off-screen by a long form or a multi-line status message.
+        self._root = ctk.CTkFrame(parent, fg_color=C["bg"])
+        self._root.pack(fill="both", expand=True)
+        self._footer = ctk.CTkFrame(self._root, fg_color=C["panel"], corner_radius=0)
+        self._footer.pack(side="bottom", fill="x")
+        self.frame = ctk.CTkScrollableFrame(self._root, fg_color=C["bg"])
+        self.frame.pack(side="top", fill="both", expand=True)
 
         self._build_deployment()
         # Dynamic containers - repopulated by _render().
@@ -121,23 +144,24 @@ class SettingsTab:
                       colour=C["btn_off"]).pack(side="left", padx=8)
 
     def _build_actions(self) -> None:
-        bar = ctk.CTkFrame(self.frame, fg_color=C["bg"])
-        bar.pack(fill="x", padx=6, pady=18)
+        """Fixed footer: action buttons plus a scrollable status/diagnostic box."""
+        bar = ctk.CTkFrame(self._footer, fg_color=C["panel"])
+        bar.pack(fill="x", padx=6, pady=(8, 4))
         accent_button(ctk, bar, "Save settings", self._save, colour=C["green"]).pack(side="left")
         accent_button(ctk, bar, "Test service", self._test_service, colour=C["blue"]).pack(side="left", padx=8)
         accent_button(ctk, bar, "Test accounting", self._test_accounting, colour=C["blue"]).pack(side="left")
         accent_button(ctk, bar, "Test Outlook", self._test_outlook, colour=C["blue"]).pack(side="left", padx=8)
         accent_button(ctk, bar, "Authorise OAuth", self._oauth, colour=C["purple"]).pack(side="left", padx=(8, 0))
         accent_button(ctk, bar, "Setup guide (all)", self._open_full_guide, colour=C["btn_off"]).pack(side="left", padx=8)
-        # Status can be a long multi-line diagnostic (Test Outlook reports what
-        # it scanned), so wrap it and let it grow instead of clipping.
-        self._status = ctk.CTkLabel(self.frame, text="", font=FONT_UI,
-                                    text_color=C["dim"], anchor="w",
-                                    justify="left", wraplength=700)
-        self._status.pack(anchor="w", fill="x", padx=6, pady=(0, 12))
-        self.frame.bind(
-            "<Configure>",
-            lambda e: self._status.configure(wraplength=max(360, e.width - 40)))
+
+        # A textbox rather than a label: diagnostics can be several lines, and
+        # this wraps, scrolls and can be selected/copied.
+        self._status_box = ctk.CTkTextbox(self._footer, height=72, wrap="word",
+                                          font=FONT_UI, fg_color=C["row"],
+                                          text_color=C["dim"])
+        self._status_box.pack(fill="x", padx=6, pady=(0, 8))
+        self._status_box.configure(state="disabled")
+        self._status = _StatusProxy(self._status_box)
 
     # -- widget helpers ----------------------------------------
     def _header(self, parent, text: str, guide_key: str | None = None) -> None:
