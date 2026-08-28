@@ -3,6 +3,15 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.25
+- **Fixed "that code didn't work" at the sign-in page.** A device code is only
+  redeemable at the verification URI belonging to the authority that issued
+  it, but 1.0.19 hardcoded microsoft.com/devicelogin - so a code issued
+  against /consumers (or any specific tenant) was correctly rejected there.
+  The app now opens the URI MSAL returns, prefers the one-click
+  verification_uri_complete when offered, and prints the exact URL and code in
+  the copyable status box.
+
 ## 1.0.24
 - The sign-in window now prints exactly what it is about to use - Client ID
   (masked, with a length/format check), tenant, authority and scopes - so a

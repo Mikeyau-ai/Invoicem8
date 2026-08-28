@@ -71,6 +71,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
 
         self._code = ""
         self._result = None
+        self._verify_uri = ""
         self.after(100, self._start)
 
     # -- helpers -------------------------------------------------
@@ -103,11 +104,19 @@ class GraphSignInDialog(ctk.CTkToplevel):
             pass
 
     def _open(self) -> None:
+        """Open the page the code was actually issued for.
+
+        A device code is only redeemable at the verification URI belonging to
+        the authority that minted it - a code issued against /consumers is
+        rejected by the generic microsoft.com/devicelogin page ("that code
+        didn't work"), so never hardcode the destination.
+        """
+        url = self._verify_uri or DEVICE_LOGIN_URL
         try:
-            webbrowser.open(DEVICE_LOGIN_URL)
+            webbrowser.open(url)
         except Exception:
-            self._say(f"Could not open a browser. Go to {DEVICE_LOGIN_URL} "
-                      f"manually and enter {self._code}.", C["yellow"])
+            self._say(f"Could not open a browser. Go to {url} manually and "
+                      f"enter {self._code}.", C["yellow"])
 
     def _close(self) -> None:
         self._closed = True
@@ -143,20 +152,28 @@ class GraphSignInDialog(ctk.CTkToplevel):
             return
 
         self._code = flow.get("user_code", "")
+        # verification_uri_complete embeds the code (one click, no typing);
+        # verification_uri is the plain page for this authority.
+        self._verify_uri = (flow.get("verification_uri_complete")
+                            or flow.get("verification_uri")
+                            or DEVICE_LOGIN_URL)
+        plain_uri = flow.get("verification_uri") or DEVICE_LOGIN_URL
         self._code_lbl.configure(text=self._code)
         self._steps.configure(
-            text=(f"1. A browser is opening {DEVICE_LOGIN_URL}\n"
+            text=(f"1. A browser is opening:  {plain_uri}\n"
                   f"2. Enter the code above and sign in as the mailbox account.\n"
                   f"3. Approve the permission request.\n\n"
-                  f"The browser may finish on a Microsoft page saying 'This is "
-                  f"not the right page' - that is normal and does NOT mean it "
-                  f"failed. This window shows the real result."))
+                  f"Use THAT page, not any other Microsoft sign-in page - the "
+                  f"code only works there. If the browser finishes on 'This is "
+                  f"not the right page', that is normal; this window shows the "
+                  f"real result."))
         # Copy/open first: both write to the status box, and the waiting
         # message must be the one left on screen.
         self._copy()
         self._open()
         self._say("Waiting for you to complete sign-in in the browser...\n\n"
-                  + report, C["yellow"])
+                  f"Enter code {self._code} at:\n{plain_uri}\n\n" + report,
+                  C["yellow"])
 
         # The worker only records the outcome; the Tk thread picks it up by
         # polling. Calling .after() from a worker thread is not reliably
