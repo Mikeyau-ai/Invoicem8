@@ -223,6 +223,13 @@ class App(ctk.CTk):
     def _replay_pending_for(self, customer_name: str, extracted_name: str) -> None:
         """Route every pending invoice whose extracted name now resolves."""
         router = Router(self.db, self.settings, emit=self.emit_event)
+        # Heal rows written before add_pending() defaulted the status, which
+        # were invisible here and so never routed.
+        healed = self.db.repair_pending_status()
+        if healed:
+            self.emit_event(level="INFO", action="repair",
+                            message=f"Recovered {healed} queued invoice(s) that "
+                                    f"were stuck awaiting review.")
         from core.parser_ai import ParseResult
         for row in self.db.list_pending("pending_new_customer"):
             if row["extracted_name"].strip().lower() not in (

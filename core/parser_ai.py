@@ -220,10 +220,26 @@ def _regex_fallback(subject: str, body: str, attachment: str,
                     filenames: str = "") -> ParseResult:
     """Cheap heuristic extraction when AI is unavailable."""
     blob = f"{subject}\n{body}\n{attachment}\n{filenames}"
-    job = re.search(r"(?:job|work\s*order|wo|job\s*no\.?|job\s*#)\s*[:#]?\s*([A-Za-z0-9-]{3,})",
-                    blob, re.I)
-    inv = re.search(r"(?:invoice|inv)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Za-z0-9-]{3,})",
-                    blob, re.I)
+    # \b anchors stop "Invoice" itself being consumed as "inv" + "oice", and
+    # the label words are skipped so "Job Reference: 10160" yields 10160 rather
+    # than the word "Reference".
+    _LABEL = r"(?:\s*(?:reference|ref|no|number|num|#|:|-)\.?)*\s*"
+
+    def _first_numeric(pattern: str):
+        """First match whose captured value contains a digit.
+
+        Reference numbers always contain digits, so this skips a neighbouring
+        word (e.g. "Invoice" followed by "Job") instead of capturing it.
+        """
+        for m in re.finditer(pattern, blob, re.I):
+            if any(ch.isdigit() for ch in m.group(1)):
+                return m
+        return None
+
+    job = _first_numeric(r"\b(?:job|work\s*order|w/?o)\b" + _LABEL
+                         + r"([A-Za-z0-9][A-Za-z0-9-]{2,})")
+    inv = _first_numeric(r"\b(?:invoice|inv|tax\s*invoice)\b" + _LABEL
+                         + r"([A-Za-z0-9][A-Za-z0-9-]{2,})")
     cust = re.search(r"(?:bill\s*to|customer|client|to)\s*[:\-]\s*(.+)", blob, re.I)
     is_credit = re.search(r"credit\s*note|adjustment\s*note|credit\s*memo|\brefund\b",
                           blob, re.I)

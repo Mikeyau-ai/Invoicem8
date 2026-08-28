@@ -274,6 +274,10 @@ class Database:
     # -- pending invoices (new-customer queue) ----------------------
     def add_pending(self, **kw: Any) -> int:
         kw.setdefault("ts", _utcnow())
+        # Every column is written explicitly below, so an omitted status would
+        # insert "" and defeat the table default - leaving the row invisible to
+        # list_pending() and the invoice silently never routed.
+        kw.setdefault("status", "pending_new_customer")
         keys = ("ts", "extracted_name", "job_number", "invoice_ref",
                 "email_subject", "email_from", "file_path", "raw_json", "status")
         vals = [kw.get(k, "") for k in keys]
@@ -282,6 +286,18 @@ class Database:
             vals,
         )
         return int(cur.lastrowid)
+
+    def repair_pending_status(self) -> int:
+        """Heal rows written before add_pending() defaulted the status.
+
+        Those were inserted with an empty status and so were never picked up
+        after the user added the customer. Returns how many were repaired.
+        """
+        rows = self._query("SELECT id FROM pending_invoices WHERE status=''")
+        if rows:
+            self._exec("UPDATE pending_invoices SET status='pending_new_customer' "
+                       "WHERE status=''")
+        return len(rows)
 
     def list_pending(self, status: str = "pending_new_customer") -> list[sqlite3.Row]:
         return self._query(

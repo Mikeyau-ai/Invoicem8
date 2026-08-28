@@ -3,6 +3,17 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.28
+- **Fixed queued invoices never uploading after you add the customer.** New
+  pending rows were written with an empty status, but the replay looked for
+  status 'pending_new_customer', so the invoice sat in the queue forever and
+  nothing was logged. Rows already stuck this way are repaired automatically
+  and reported in the Activity Log.
+- Regex fallback parsing fixed: "Invoice" was being read as "inv" + "oice"
+  (giving ref=oice), and "Job Reference: 10160" captured the word "Reference"
+  instead of 10160. Label words are now skipped and only values containing a
+  digit are accepted.
+
 ## 1.0.27
 - New-customer prompt: the window was too small, so the Add / Skip buttons
   were cut off and the form could not be scrolled. It is now larger,
