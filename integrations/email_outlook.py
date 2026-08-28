@@ -1,10 +1,14 @@
-"""Outlook access with two interchangeable backends.
+"""Mailbox access with interchangeable backends.
 
-* ``com``   - local Outlook via pywin32 (works with the desktop client the
-              user is already signed into; no cloud credentials needed).
-* ``graph`` - Microsoft Graph REST API using MSAL refresh-token auth.
+* ``com``   - CLASSIC Outlook desktop via pywin32. No credentials, but needs a
+              paid Microsoft 365 subscription and does not work with the new
+              Outlook for Windows (no COM interface).
+* ``graph`` - Microsoft Graph REST API with device-code OAuth2. The route for
+              the new Outlook and outlook.com accounts.
+* ``imap``  - generic IMAP (see :mod:`integrations.email_imap`) for Gmail,
+              Fastmail and most providers that still accept an app password.
 
-Both backends return a list of :class:`EmailMessage`; attachments are written
+Every backend returns a list of :class:`EmailMessage`; attachments are written
 to the attachment cache and referenced by path.
 """
 from __future__ import annotations
@@ -360,12 +364,24 @@ class GraphBackend(OutlookBackend):
 def build_backend(settings) -> OutlookBackend:
     """Factory that returns the backend selected in Settings.
 
-    Both backends stay available: COM suits sites running classic desktop
-    Outlook, Graph suits the new Outlook / outlook.com / anywhere COM is not
-    an option.
+    All three stay available: COM for sites running classic desktop Outlook,
+    Graph for the new Outlook / outlook.com, and IMAP for Gmail, Fastmail and
+    most other providers that still accept an app password.
     """
     account = settings.get("outlook.account", "")
     folder = settings.get("outlook.folder", "Inbox")
-    if settings.get("outlook.backend", "com") == "graph":
+    backend = settings.get("outlook.backend", "com")
+
+    if backend == "graph":
         return GraphBackend(settings, account=account, folder=folder)
+    if backend == "imap":
+        from integrations.email_imap import ImapBackend
+
+        return ImapBackend(
+            host=settings.get("imap.host"),
+            port=settings.get_int("imap.port", 993),
+            username=settings.get("imap.username") or account,
+            password=settings.get("imap.password"),
+            folder=settings.get("imap.folder") or folder or "INBOX",
+        )
     return ComBackend(account=account, folder=folder)

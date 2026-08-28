@@ -38,6 +38,14 @@ OUTLOOK_BY_BACKEND = {
         ("outlook.graph_client_id", "Application (client) ID", True),
         ("outlook.graph_tenant", "Tenant (blank = common)", False),
     ],
+    # IMAP needs a server + app password; the preset dropdown fills host/port.
+    "imap": [
+        ("imap.host", "IMAP server", False),
+        ("imap.port", "Port", False),
+        ("imap.username", "Username / email address", False),
+        ("imap.password", "App password", True),
+        ("imap.folder", "IMAP folder", False),
+    ],
 }
 
 
@@ -150,7 +158,7 @@ class SettingsTab:
         accent_button(ctk, bar, "Save settings", self._save, colour=C["green"]).pack(side="left")
         accent_button(ctk, bar, "Test service", self._test_service, colour=C["blue"]).pack(side="left", padx=8)
         accent_button(ctk, bar, "Test accounting", self._test_accounting, colour=C["blue"]).pack(side="left")
-        accent_button(ctk, bar, "Test Outlook", self._test_outlook, colour=C["blue"]).pack(side="left", padx=8)
+        accent_button(ctk, bar, "Test mailbox", self._test_outlook, colour=C["blue"]).pack(side="left", padx=8)
         accent_button(ctk, bar, "Authorise OAuth", self._oauth, colour=C["purple"]).pack(side="left", padx=(8, 0))
         accent_button(ctk, bar, "Setup guide (all)", self._open_full_guide, colour=C["btn_off"]).pack(side="left", padx=8)
 
@@ -229,6 +237,34 @@ class SettingsTab:
             if m["label"] == label:
                 return k
         return "gemini"
+
+    def _build_imap_preset(self) -> None:
+        """Provider preset that fills the host/port fields for the user."""
+        from integrations.email_imap import IMAP_PRESETS
+
+        row = ctk.CTkFrame(self._outlook_box, fg_color=C["bg"])
+        row.pack(fill="x", padx=6, pady=(6, 2))
+        ctk.CTkLabel(row, text="Provider preset", font=FONT_UI,
+                     text_color=C["text"], width=250, anchor="w").pack(side="left")
+        menu = ctk.CTkOptionMenu(row, values=list(IMAP_PRESETS))
+        menu.set(self._settings.get("imap.preset", "Gmail"))
+        menu.pack(side="left")
+
+        def apply_preset() -> None:
+            name = menu.get()
+            host, port = IMAP_PRESETS.get(name, ("", 993))
+            self._settings.set("imap.preset", name)
+            if host:
+                for key, value in (("imap.host", host), ("imap.port", str(port))):
+                    if key in self._fields:
+                        self._fields[key].delete(0, "end")
+                        self._fields[key].insert(0, value)
+            self._status.configure(
+                text=f"Preset '{name}' applied - now enter your email address "
+                     f"and app password, then Save settings.", text_color=C["dim"])
+
+        accent_button(ctk, row, "Apply preset", apply_preset,
+                      colour=C["btn_off"]).pack(side="left", padx=8)
 
     def _build_graph_signin(self) -> None:
         """Sign-in row for the Graph backend: status + sign in / sign out."""
@@ -328,10 +364,12 @@ class SettingsTab:
 
         # --- Outlook ---
         backend = getattr(self, "_ob_value", None) or self._settings.get("outlook.backend", "com")
-        self._header(self._outlook_box, "Outlook",
-                     guide_key="outlook_graph" if backend == "graph" else "outlook_com")
+        self._header(self._outlook_box, "Email",
+                     guide_key={"graph": "outlook_graph",
+                                "imap": "outlook_imap"}.get(backend, "outlook_com"))
         self._outlook_backend = self._dropdown(
-            self._outlook_box, "Backend", ["com", "graph"], self._on_backend_change)
+            self._outlook_box, "Backend", ["com", "graph", "imap"],
+            self._on_backend_change)
         self._outlook_backend.set(backend)
         self._ob_value = backend
         for key, lbl, secret in OUTLOOK_COMMON:
@@ -347,6 +385,15 @@ class SettingsTab:
             self._row(self._outlook_box, key, lbl, secret)
         if backend == "graph":
             self._build_graph_signin()
+        elif backend == "imap":
+            self._build_imap_preset()
+            self._note(self._outlook_box,
+                       "IMAP works with Gmail, Fastmail, Yahoo, iCloud and most "
+                       "business mail hosts using an APP PASSWORD (not your normal "
+                       "password). It does NOT work with outlook.com - Microsoft "
+                       "disabled app passwords for personal accounts in Sept 2024; "
+                       "use 'graph' for those, or auto-forward that mail to a "
+                       "provider listed above. Click 'Setup guide' for the steps.")
 
         # --- AI ---
         akey = self._ai_key()
@@ -416,17 +463,18 @@ class SettingsTab:
                                  allowed_ext=set())
             detail = getattr(backend, "last_scan", "") or f"{len(msgs)} message(s) found."
             self._status.configure(
-                text=f"Outlook OK - {detail}",
+                text=f"Mailbox OK - {detail}",
                 text_color=C["green"] if msgs else C["yellow"])
         except Exception as exc:
-            self._status.configure(text=f"Outlook error: {exc}", text_color=C["red"])
+            self._status.configure(text=f"Mailbox error: {exc}", text_color=C["red"])
 
     def _open_full_guide(self) -> None:
         """Setup guide covering every currently-selected section."""
         keys = [
             self._provider_key(self._service, SERVICE_PROVIDERS),
             self._provider_key(self._accounting, ACCOUNTING_PROVIDERS),
-            "outlook_graph" if getattr(self, "_ob_value", "com") == "graph" else "outlook_com",
+            {"graph": "outlook_graph", "imap": "outlook_imap"}.get(
+                getattr(self, "_ob_value", "com"), "outlook_com"),
             self._ai_key(),
         ]
         sections = [(k, SETUP_GUIDES[k]) for k in keys if k in SETUP_GUIDES]

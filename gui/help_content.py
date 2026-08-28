@@ -163,13 +163,38 @@ FIELD_HELP: dict[str, str] = {
         "device-code flow.\n\n"
         "Personal (outlook.com/live.com) account and the portal says "
         "'AADSTS16000 ... does not exist in tenant Microsoft Services'? You "
-        "have no directory yet. Entra ID > Manage tenants > + Create > "
-        "Microsoft Entra ID, then switch into the new directory. Free, no "
-        "credit card. Full steps are in the Setup guide.",
+        "have no Entra directory yet. Creating a tenant directly is now limited "
+        "to paying customers, so sign up for the free Azure account at "
+        "azure.microsoft.com with this same Microsoft account - that creates a "
+        "Default Directory and App registrations then works. Full steps are in "
+        "the Setup guide.",
     "outlook.graph_tenant":
         "Leave blank (defaults to 'common', which accepts both personal "
         "outlook.com and work/school accounts). Only set this to your Directory "
         "(tenant) ID if you registered the app as single-tenant.",
+
+    # -- IMAP --
+    "imap.host":
+        "Your provider's IMAP server. Gmail: imap.gmail.com. Fastmail: "
+        "imap.fastmail.com. Yahoo: imap.mail.yahoo.com. iCloud: "
+        "imap.mail.me.com. Business/cPanel hosts are usually "
+        "mail.yourdomain.com - check your host's 'email client settings' page.",
+    "imap.port":
+        "993 for IMAP over SSL, which is what almost everyone uses. Only change "
+        "it if your provider documents a different port.",
+    "imap.username":
+        "Usually your full email address. Some business hosts use a separate "
+        "mailbox username - check your host's client settings page.",
+    "imap.password":
+        "An APP PASSWORD, not your normal login password. Gmail: turn on "
+        "2-Step Verification, then myaccount.google.com/apppasswords. Yahoo, "
+        "iCloud and Fastmail have the same feature under account security. "
+        "outlook.com no longer issues working app passwords - use the Graph "
+        "backend for those accounts.",
+    "imap.folder":
+        "INBOX by default. For a sub-folder use the full path as the server "
+        "names it, e.g. 'INBOX/Invoices'. If the name is wrong, Test mailbox "
+        "lists the folders it can see.",
 
     # -- AI --
     "ai.model":
@@ -347,19 +372,22 @@ SETUP_GUIDES: dict[str, str] = {
         "required for an app registration.)\n"
         "1a. IF YOU SEE 'Interaction required' / AADSTS16000 saying your "
         "live.com account 'does not exist in tenant Microsoft Services':\n"
-        "    A personal Microsoft account starts in Microsoft's shared tenant, "
-        "which has no directory, so App registrations is unavailable. Create "
-        "your own free directory once:\n"
+        "    A personal Microsoft account has no Entra directory, so App "
+        "registrations is unavailable. Microsoft now lets only PAYING "
+        "customers create a tenant directly, so the way through is to sign up "
+        "for the free Azure account, which creates a Default Directory for "
+        "you:\n"
         "      - Dismiss the dialog with 'Ignore'.\n"
-        "      - Search the portal for 'Microsoft Entra ID' and open it.\n"
-        "      - Click 'Manage tenants' > '+ Create'.\n"
-        "      - Choose 'Microsoft Entra ID', Next.\n"
-        "      - Organisation name: anything (e.g. InvoiceM8). Initial domain: "
-        "anything unique. Country: your country. Review + create.\n"
-        "      - When it finishes, use the Directory switcher (top right) to "
-        "switch INTO your new directory.\n"
-        "    This is free (Entra ID free tier) and needs no credit card. You "
-        "are the Global Administrator of it.\n"
+        "      - Go to azure.microsoft.com and start the free account.\n"
+        "      - Sign in with this SAME Microsoft account and finish sign-up. "
+        "A card is needed for identity verification; the free tier is not "
+        "charged, and app registration stays on the always-free Entra tier "
+        "even after any trial credit expires.\n"
+        "      - Return to portal.azure.com - you now land in your own Default "
+        "Directory, and App registrations works.\n"
+        "    Prefer to avoid all of this? Use the IMAP backend instead - but "
+        "IMAP does NOT work with outlook.com, so you would first auto-forward "
+        "the invoices to e.g. a Gmail address.\n"
         "2. Microsoft Entra ID > App registrations > New registration.\n"
         "   - Name: InvoiceM8\n"
         "   - Supported account types: 'Accounts in any organizational "
@@ -413,6 +441,38 @@ SETUP_GUIDES: dict[str, str] = {
         "- LM Studio (local): http://localhost:1234/v1    (no key; start its "
         "local server)\n\n"
         "If the host rejects JSON mode the app automatically retries without it."
+    ),
+    "outlook_imap": (
+        "Email - IMAP backend (Gmail, Fastmail, Yahoo, iCloud, business hosts)\n"
+        "The simplest option when it is available: no Azure, no app "
+        "registration, no subscription. You need the server name and an APP "
+        "PASSWORD.\n\n"
+        "Gmail (most common):\n"
+        "1. myaccount.google.com > Security > turn ON 2-Step Verification "
+        "(app passwords are unavailable without it).\n"
+        "2. Go to myaccount.google.com/apppasswords\n"
+        "3. Name it 'InvoiceM8' and Create. Copy the 16-character password.\n"
+        "4. In InvoiceM8: IMAP server imap.gmail.com, Port 993, Username your "
+        "full Gmail address, App password the 16 characters (spaces are fine), "
+        "Folder INBOX.\n"
+        "5. Save settings, then Test mailbox.\n\n"
+        "Other providers - same idea, different server:\n"
+        "  Fastmail  imap.fastmail.com    993\n"
+        "  Yahoo     imap.mail.yahoo.com  993\n"
+        "  iCloud    imap.mail.me.com     993\n"
+        "  Zoho      imap.zoho.com        993\n"
+        "  Business/cPanel: usually mail.yourdomain.com - see your host's "
+        "'email client settings' page.\n\n"
+        "IMPORTANT - outlook.com / hotmail.com / live.com:\n"
+        "Microsoft turned off app-password (Basic auth) access for personal "
+        "Microsoft accounts on 16 September 2024, so IMAP cannot work with "
+        "them at all. Either use the 'graph' backend, or add a rule in "
+        "Outlook.com that auto-forwards invoice emails to a Gmail address and "
+        "point IMAP at that instead.\n\n"
+        "Notes:\n"
+        "- Mail is read with BODY.PEEK, so InvoiceM8 never marks your messages "
+        "as read.\n"
+        "- Only emails WITH attachments are queued; plain emails are ignored."
     ),
     "gemini": (
         "Google Gemini API key\n"

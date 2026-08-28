@@ -3,6 +3,21 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.16
+- **New IMAP backend** (Settings > Email > Backend = `imap`). Works with
+  Gmail, Fastmail, Yahoo, iCloud, Zoho and most business/cPanel mail hosts
+  using just a server name and an app password - no Azure, no app
+  registration, no subscription. A provider preset fills in the server and
+  port for you. Mail is read with BODY.PEEK so your messages are never marked
+  as read, and only emails with attachments are queued.
+- **Corrected Graph guidance.** Microsoft now restricts creating a new Entra
+  tenant to paid customers, so the advice added in 1.0.15 (create a free
+  directory) no longer works on its own: a personal Microsoft account has to
+  sign up for a free Azure account first, which creates the directory. The
+  guide now says so, and points at IMAP as the easier route where possible.
+- "Test Outlook" is now "Test mailbox", and the section is titled "Email",
+  since it covers three backends. COM and Graph are unchanged.
+
 ## 1.0.15
 - Graph setup guide and the Client ID help now cover the "AADSTS16000 /
   Interaction required - your live.com account does not exist in tenant
