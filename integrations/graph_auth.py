@@ -52,11 +52,22 @@ def _app(settings, cache):
 
     client_id = settings.get("outlook.graph_client_id", "").strip()
     if not client_id:
+        # A blank client ID also happens when the stored (encrypted) value can
+        # no longer be decrypted, which is easy to mistake for a portal
+        # misconfiguration - Microsoft returns baffling errors for an empty
+        # client_id - so say both possibilities out loud.
+        extra = ""
+        try:
+            if "outlook.graph_client_id" in settings.unreadable_secrets():
+                extra = (" The value IS saved but can no longer be decrypted "
+                         "(the local encryption key changed), so it reads as "
+                         "empty. Re-enter it and click Save settings.")
+        except Exception:
+            pass
         raise RuntimeError(
-            "No Graph Client ID configured. Register a free app at "
-            "portal.azure.com > Microsoft Entra ID > App registrations, allow "
-            "'Personal Microsoft accounts', add the delegated Graph permission "
-            "'Mail.Read', then paste its Application (client) ID here."
+            "No Graph Client ID configured." + extra +
+            " Get one from entra.microsoft.com > Entra ID > App registrations "
+            "> your app > Overview > Application (client) ID."
         )
     return msal.PublicClientApplication(
         client_id, authority=_authority(settings.get("outlook.graph_tenant", "common")),

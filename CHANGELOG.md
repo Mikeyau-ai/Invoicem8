@@ -3,6 +3,20 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.23
+- **Fixed silent credential loss.** If the local encryption key in Windows
+  Credential Manager is lost or regenerated, every saved API key, client ID
+  and password becomes unrecoverable - and previously they just read back as
+  EMPTY while the fields still showed masked dots, so the app looked
+  configured but failed with confusing errors from the remote service.
+  Settings now shows a red warning naming exactly which credentials must be
+  re-entered.
+- The Graph "no Client ID" error now says when the value is saved but
+  undecryptable, instead of implying the app registration is wrong.
+- A newly generated master key is read straight back to confirm Credential
+  Manager actually persisted it; if it did not, the app falls back to a local
+  key file so secrets survive a restart rather than being orphaned each launch.
+
 ## 1.0.22
 - Sign-in window gains a "Copy status text" button, and every sign-in outcome
   is written to %LOCALAPPDATA%\InvoiceM8\logs\invoicem8.log - so the exact

@@ -114,3 +114,19 @@ class Settings:
 
     def _explicitly_set(self) -> set[str]:
         return set(self._db.all_settings().keys())
+
+    def unreadable_secrets(self) -> list[str]:
+        """Encrypted settings that no longer decrypt, so must be re-entered.
+
+        Happens when the Fernet master key in Windows Credential Manager is
+        lost or regenerated: the ciphertext in the database is then orphaned.
+        Returning the key names lets the UI say which credentials are gone,
+        rather than showing a masked field that is actually empty.
+        """
+        broken: list[str] = []
+        for key, row in self._db.all_settings().items():
+            if not row["encrypted"] or not row["value"]:
+                continue
+            if self._box.decrypt(row["value"]) == "":
+                broken.append(key)
+        return broken

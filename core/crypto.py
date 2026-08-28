@@ -34,6 +34,14 @@ def _load_or_create_key() -> bytes:
             return existing.encode("utf-8")
         key = Fernet.generate_key()
         keyring.set_password(KEYRING_SERVICE, KEYRING_USERNAME, key.decode("utf-8"))
+        # Read it straight back: a backend that accepts the write but does not
+        # persist would silently mint a new key on every launch, orphaning
+        # every stored secret.
+        if keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME) != key.decode("utf-8"):
+            log.error("Credential Manager did not persist the master key; "
+                      "falling back to a local key file so saved secrets "
+                      "survive a restart.")
+            raise RuntimeError("keyring did not persist the master key")
         log.info("Generated new master key in Windows Credential Manager.")
         return key
     except Exception as exc:  # keyring backend missing / locked
@@ -53,6 +61,8 @@ class SecretBox:
     """Thin wrapper around Fernet for encrypting/decrypting setting values."""
 
     def __init__(self) -> None:
+        #: number of stored secrets that could not be decrypted this session
+        self.decrypt_failures = 0
         self._fernet = Fernet(_load_or_create_key())
 
     def encrypt(self, plaintext: str) -> str:
@@ -62,13 +72,21 @@ class SecretBox:
         return self._fernet.encrypt(plaintext.encode("utf-8")).decode("ascii")
 
     def decrypt(self, token: str) -> str:
-        """Decrypt a token produced by :meth:`encrypt`. Returns '' on failure."""
+        """Decrypt a token produced by :meth:`encrypt`. Returns '' on failure.
+
+        A failure means the master key changed since the value was written, so
+        the stored secret is unrecoverable and must be re-entered. We count
+        these so the UI can say so instead of silently showing a blank field
+        that still looks populated.
+        """
         if not token:
             return ""
         try:
             return self._fernet.decrypt(token.encode("ascii")).decode("utf-8")
         except (InvalidToken, ValueError):
-            log.error("Failed to decrypt a stored secret (key rotated?).")
+            self.decrypt_failures += 1
+            log.error("Failed to decrypt a stored secret (master key changed) - "
+                      "it must be re-entered.")
             return ""
 
     @staticmethod

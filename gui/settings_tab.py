@@ -402,6 +402,30 @@ class SettingsTab:
         from core import updater
         (self._auto_update.select if updater.auto_check_pref() else self._auto_update.deselect)()
         self._render()
+        self._warn_unreadable_secrets()
+
+    def _warn_unreadable_secrets(self) -> None:
+        """Tell the user plainly when stored credentials can no longer be read.
+
+        The local encryption key living in Windows Credential Manager can be
+        lost (new PC, cleared credentials, different user). The ciphertext in
+        the database is then unrecoverable, and every affected field silently
+        reads back as empty - which looks like a working config but is not.
+        """
+        try:
+            broken = self._settings.unreadable_secrets()
+        except Exception:
+            return
+        if not broken:
+            return
+        pretty = ", ".join(sorted(broken))
+        self._status.configure(
+            text=("STORED CREDENTIALS COULD NOT BE READ. The local encryption "
+                  "key changed, so these saved values are unrecoverable and are "
+                  "being treated as EMPTY: " + pretty + ". Re-enter each one "
+                  "above and click Save settings. Until you do, anything using "
+                  "them will fail with confusing errors."),
+            text_color=C["red"])
 
     def _save(self) -> None:
         for key, entry in self._fields.items():
