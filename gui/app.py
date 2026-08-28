@@ -50,6 +50,7 @@ class App(ctk.CTk):
         self.minsize(920, 600)
         self.configure(fg_color=C["bg"])
         theme.dark_titlebar(self)
+        theme.apply_icon(self)
 
         self._running = False
         self._closing = False

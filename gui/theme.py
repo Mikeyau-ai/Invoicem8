@@ -139,3 +139,19 @@ def accent_button(ctk, parent, text, command, colour=None, **kw):
         fg_color=colour, hover_color=shade(colour, 0.82),
         text_color="#ffffff", font=FONT_BTN, **kw
     )
+
+
+def apply_icon(window) -> None:
+    """Give a window the InvoiceM8 icon (taskbar + title bar).
+
+    Same .ico PyInstaller stamps into the executable, so the taskbar icon and
+    the file icon always match. Silently ignored if the asset is missing or the
+    platform has no .ico support.
+    """
+    from config import ICON_PATH
+
+    try:
+        if ICON_PATH.exists():
+            window.iconbitmap(default=str(ICON_PATH))
+    except Exception:
+        pass

@@ -127,7 +127,7 @@ AI_PROVIDERS: dict[str, dict] = {
     "gemini": {
         "label": "Google Gemini",
         "key_setting": "ai.gemini_api_key",
-        "default_model": "gemini-1.5-flash",
+        "default_model": "",   # resolved from the API - ids get retired
         "needs_key": True,
         "needs_base_url": False,
     },
@@ -180,16 +180,97 @@ def _call_openai_chat(api_key: str, model: str, prompt: str,
     return data["choices"][0]["message"]["content"] or ""
 
 
-def _call_gemini(api_key: str, model: str, prompt: str) -> str:
-    """Google Generative Language API - generateContent."""
-    model = model or "gemini-1.5-flash"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    data = _post(url, {"x-goog-api-key": api_key}, {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"response_mime_type": "application/json", "temperature": 0},
-    })
+_GEMINI_ROOT = "https://generativelanguage.googleapis.com/v1beta"
+
+#: Tried in order when no model is configured. Google retires model ids without
+#: warning (gemini-1.5-flash started returning 404), so never rely on one name.
+_GEMINI_CANDIDATES = (
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-flash-latest",
+)
+
+#: Cache of the model id discovered from the API, so we ask at most once.
+_gemini_resolved: str = ""
+
+
+def gemini_available_models(api_key: str) -> list[str]:
+    """Model ids this key can actually call generateContent on.
+
+    Asking the API beats hardcoding: it stays correct when Google renames or
+    retires models, and it turns a bare 404 into an actionable list.
+    """
+    resp = requests.get(f"{_GEMINI_ROOT}/models",
+                        headers={"x-goog-api-key": api_key}, timeout=_HTTP_TIMEOUT)
+    resp.raise_for_status()
+    out = []
+    for m in resp.json().get("models", []):
+        if "generateContent" in (m.get("supportedGenerationMethods") or []):
+            out.append((m.get("name") or "").removeprefix("models/"))
+    return [m for m in out if m]
+
+
+def _pick_gemini_model(api_key: str) -> str:
+    """Best available model: a preferred candidate, else any flash, else any."""
+    global _gemini_resolved
+    if _gemini_resolved:
+        return _gemini_resolved
+    models = gemini_available_models(api_key)
+    for want in _GEMINI_CANDIDATES:
+        if want in models:
+            _gemini_resolved = want
+            break
+    else:
+        flash = [m for m in models if "flash" in m and "thinking" not in m]
+        _gemini_resolved = (flash or models or [""])[0]
+    if _gemini_resolved:
+        log.info("Gemini model resolved to %s", _gemini_resolved)
+    return _gemini_resolved
+
+
+def _gemini_generate(api_key: str, model: str, prompt: str) -> str:
+    """One generateContent call against a specific model id."""
+    data = _post(f"{_GEMINI_ROOT}/models/{model}:generateContent",
+                 {"x-goog-api-key": api_key}, {
+                     "contents": [{"parts": [{"text": prompt}]}],
+                     "generationConfig": {"response_mime_type": "application/json",
+                                          "temperature": 0},
+                 })
     parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
     return "".join(p.get("text", "") for p in parts)
+
+
+def _call_gemini(api_key: str, model: str, prompt: str) -> str:
+    """Google Generative Language API, resilient to retired model ids.
+
+    A configured model is tried first; on 404 (retired/renamed/not available to
+    this key) we ask the API what it does offer and retry once.
+    """
+    chosen = (model or "").strip()
+    if chosen:
+        try:
+            return _gemini_generate(api_key, chosen, prompt)
+        except requests.HTTPError as exc:
+            if exc.response is None or exc.response.status_code != 404:
+                raise
+            log.warning("Gemini model %s returned 404; discovering a current one.",
+                        chosen)
+
+    fallback = _pick_gemini_model(api_key)
+    if not fallback:
+        raise RuntimeError(
+            "This Gemini API key has no models that support generateContent. "
+            "Check the key at aistudio.google.com.")
+    try:
+        return _gemini_generate(api_key, fallback, prompt)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            raise RuntimeError(
+                f"Gemini rejected both '{chosen or '(default)'}' and the "
+                f"discovered '{fallback}'. Models this key can use: "
+                f"{', '.join(gemini_available_models(api_key)[:12]) or '(none)'}"
+            ) from exc
+        raise
 
 
 def _call_anthropic(api_key: str, model: str, prompt: str) -> str:

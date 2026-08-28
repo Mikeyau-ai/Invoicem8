@@ -42,3 +42,19 @@ def ensure_dirs() -> None:
     """Create all runtime directories. Safe to call repeatedly."""
     for d in (DATA_DIR, ATTACHMENT_CACHE, LOG_DIR):
         d.mkdir(parents=True, exist_ok=True)
+
+
+def resource_path(name: str) -> Path:
+    """Absolute path to a bundled asset, from source or a PyInstaller build.
+
+    PyInstaller unpacks datas into ``sys._MEIPASS`` at runtime; running from
+    source they sit next to this file.
+    """
+    import sys
+
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / name
+
+
+#: Window/taskbar icon - the same file PyInstaller stamps into the exe.
+ICON_PATH = resource_path("assets/icon.ico")

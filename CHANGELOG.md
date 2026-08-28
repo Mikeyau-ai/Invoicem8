@@ -3,6 +3,15 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.31
+- **Fixed Google Gemini failing with 404.** Google retired `gemini-1.5-flash`,
+  so every AI parse fell back to regex. The app now asks the Gemini API which
+  models the key can actually use and retries automatically, preferring a
+  current flash model - so a future rename cannot break it either. If nothing
+  works, the error lists the models the key does have.
+- **App icon.** InvoiceM8 now has its own icon, used for both the .exe and the
+  window/taskbar so they match. Regenerate with `python make_icon.py`.
+
 ## 1.0.30
 Efficiency pass over the whole ingest path, plus a full code-annotation sweep.
 See `plan.md` for the findings this implements.

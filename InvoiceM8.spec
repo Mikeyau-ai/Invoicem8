@@ -41,6 +41,11 @@ _bundle("customtkinter")
 if os.path.exists("CHANGELOG.md"):
     datas.append(("CHANGELOG.md", "."))
 
+# The window/taskbar icon must exist at runtime too, not just be stamped into
+# the exe header - iconbitmap() reads the actual file.
+if os.path.exists("assets/icon.ico"):
+    datas.append(("assets/icon.ico", "assets"))
+
 # Outlook COM (pywin32) - lazily imported, so name the submodules.
 hiddenimports += [
     "win32com", "win32com.client", "win32com.server",
