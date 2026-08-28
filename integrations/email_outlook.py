@@ -494,11 +494,10 @@ class GraphBackend(OutlookBackend):
 
 
 def build_backend(settings) -> OutlookBackend:
-    """Factory that returns the backend selected in Settings.
+    """Backend for the legacy single-mailbox settings.
 
-    All three stay available: COM for sites running classic desktop Outlook,
-    Graph for the new Outlook / outlook.com, and IMAP for Gmail, Fastmail and
-    most other providers that still accept an app password.
+    Kept for the Settings "Test mailbox" button and for installs that have not
+    added any mailbox rows yet; the watcher uses :func:`build_account_backends`.
     """
     account = settings.get("outlook.account", "")
     folder = settings.get("outlook.folder", "Inbox")
@@ -517,3 +516,50 @@ def build_backend(settings) -> OutlookBackend:
             folder=settings.get("imap.folder") or folder or "INBOX",
         )
     return ComBackend(account=account, folder=folder)
+
+
+def build_backend_for(settings, db, row) -> OutlookBackend:
+    """Backend for one ``mail_accounts`` row.
+
+    Each mailbox carries its own credentials - a Graph token cache or an IMAP
+    password - because those cannot be shared between accounts the way a single
+    COM profile can.
+    """
+    backend = (row["backend"] or "com").strip()
+    address = (row["address"] or "").strip()
+    folder = (row["folder"] or "").strip()
+
+    if backend == "graph":
+        from integrations.graph_auth import AccountTokenStore
+
+        # /me is the mailbox that signed in, so the address is not sent as a
+        # user id - it is only a label unless a tenant granted wider access.
+        return GraphBackend(AccountTokenStore(settings, db, row["id"]),
+                            account="", folder=folder or "Inbox")
+    if backend == "imap":
+        from integrations.email_imap import ImapBackend
+
+        try:
+            port = int(row["imap_port"] or 993)
+        except (TypeError, ValueError):
+            port = 993
+        return ImapBackend(
+            host=row["imap_host"],
+            port=port,
+            username=(row["imap_username"] or address),
+            password=settings.decrypt_value(row["imap_password"]),
+            folder=folder or "INBOX",
+        )
+    return ComBackend(account=address, folder=folder or "Inbox")
+
+
+def account_backends(settings, db):
+    """(row, backend) for every enabled mailbox.
+
+    Falls back to the single-mailbox settings when no rows exist, so upgrading
+    an existing install keeps working with nothing to configure.
+    """
+    rows = db.list_mail_accounts(enabled_only=True)
+    if not rows:
+        return [(None, build_backend(settings))]
+    return [(r, build_backend_for(settings, db, r)) for r in rows]

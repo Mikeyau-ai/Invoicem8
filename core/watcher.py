@@ -23,7 +23,7 @@ from core.database import Database
 from core.housekeeping import prune_attachment_cache
 from core.parser_ai import InvoiceParser
 from core.router import Router
-from integrations.email_outlook import build_backend
+from integrations.email_outlook import account_backends
 
 log = logging.getLogger(__name__)
 
@@ -139,19 +139,35 @@ class Watcher:
                                f"folder(s), trimmed {trimmed} old log row(s).")
 
     def _poll(self, since, unread_only: bool, back_check: bool = False) -> None:
-        """One inbox scan -> parse -> route cycle."""
-        backend = build_backend(self._settings)
+        """One scan -> parse -> route cycle across every enabled mailbox."""
         # Prefilter on the mailbox side so attachments no customer wants are
         # never transferred; per-customer filtering still happens in the router.
         allowed_ext = self._db.all_file_types()
         # Already-handled mail is skipped before its attachments are fetched.
         seen_ids = self._db.recent_processed_ids()
-        messages = backend.fetch(since=since, unread_only=unread_only,
-                                 allowed_ext=allowed_ext, seen_ids=seen_ids)
+
+        messages = []
+        for row, backend in account_backends(self._settings, self._db):
+            label = (row["address"] if row and row["address"]
+                     else "the configured mailbox")
+            if self._stop.is_set():
+                return
+            try:
+                found = backend.fetch(since=since, unread_only=unread_only,
+                                      allowed_ext=allowed_ext, seen_ids=seen_ids)
+            except Exception as exc:
+                # One broken mailbox must not stop the others being scanned.
+                log.exception("Mailbox %s failed", label)
+                self._emit(level="ERROR", action="poll",
+                           message=f"Mailbox '{label}' failed: {exc}")
+                continue
+            if not found:
+                detail = getattr(backend, "last_scan", "") or "No new emails."
+                self._emit(level="INFO", action="poll",
+                           message=f"[{label}] Nothing to process. {detail}")
+            messages.extend(found)
+
         if not messages:
-            detail = getattr(backend, "last_scan", "") or "No new emails."
-            self._emit(level="INFO", action="poll",
-                       message=f"Nothing to process. {detail}")
             return
 
         for msg in sorted(messages, key=lambda m: m.received_at):

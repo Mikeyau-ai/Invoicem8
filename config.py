@@ -10,6 +10,16 @@ from pathlib import Path
 
 APP_NAME = "InvoiceM8"
 
+#: Entra "Application (client) ID" shipped with InvoiceM8 so customers never
+#: have to touch Azure. Public-client IDs are not secrets (Thunderbird, Postman
+#: and others ship theirs the same way) - the sign-in still happens against the
+#: user's own Microsoft account, and no client secret exists. A site can still
+#: override it in Settings to use their own app registration.
+DEFAULT_GRAPH_CLIENT_ID = "c5efd32b-1477-4928-a238-c726076895d4"
+
+#: Hard cap on monitored mailboxes.
+MAX_MAIL_ACCOUNTS = 10
+
 # Base data directory (created on first run).
 if os.name == "nt":
     _base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))

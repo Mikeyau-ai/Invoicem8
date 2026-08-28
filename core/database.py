@@ -84,6 +84,24 @@ CREATE TABLE IF NOT EXISTS pending_invoices (
     status         TEXT NOT NULL DEFAULT 'pending_new_customer'
 );
 
+-- One row per monitored mailbox. Each carries its own credentials: a Graph
+-- token cache or an IMAP password, since those are per-account and cannot be
+-- shared the way a COM profile can.
+CREATE TABLE IF NOT EXISTS mail_accounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    position      INTEGER NOT NULL DEFAULT 0,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    backend       TEXT NOT NULL DEFAULT 'graph',   -- com | graph | imap
+    address       TEXT NOT NULL DEFAULT '',
+    folder        TEXT NOT NULL DEFAULT '',
+    graph_cache   TEXT NOT NULL DEFAULT '',        -- encrypted MSAL cache
+    imap_host     TEXT NOT NULL DEFAULT '',
+    imap_port     TEXT NOT NULL DEFAULT '993',
+    imap_username TEXT NOT NULL DEFAULT '',
+    imap_password TEXT NOT NULL DEFAULT '',        -- encrypted
+    created_at    TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS processed_emails (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id  TEXT NOT NULL UNIQUE,
@@ -444,6 +462,44 @@ class Database:
         self._exec("UPDATE pending_invoices SET status=? WHERE id=?", (status, pid))
 
     # -- processed email dedupe -----------------------------------
+    # -- mail accounts -------------------------------------------
+    def list_mail_accounts(self, enabled_only: bool = False) -> list[sqlite3.Row]:
+        """Monitored mailboxes in display order."""
+        sql = "SELECT * FROM mail_accounts"
+        if enabled_only:
+            sql += " WHERE enabled=1"
+        return self._query(sql + " ORDER BY position, id")
+
+    def add_mail_account(self, **kw: Any) -> int:
+        """Append a mailbox row and return its id."""
+        rows = self._query("SELECT COALESCE(MAX(position), -1) AS p FROM mail_accounts")
+        kw.setdefault("position", (rows[0]["p"] if rows else -1) + 1)
+        kw.setdefault("created_at", _utcnow())
+        keys = ("position", "enabled", "backend", "address", "folder",
+                "graph_cache", "imap_host", "imap_port", "imap_username",
+                "imap_password", "created_at")
+        vals = [kw.get(k, 1 if k == "enabled" else "") for k in keys]
+        cur = self._exec(
+            f"INSERT INTO mail_accounts({','.join(keys)}) "
+            f"VALUES({','.join('?' for _ in keys)})", vals)
+        return int(cur.lastrowid)
+
+    def update_mail_account(self, account_id: int, **fields: Any) -> None:
+        """Patch named columns on one mailbox row."""
+        allowed = {"position", "enabled", "backend", "address", "folder",
+                   "graph_cache", "imap_host", "imap_port", "imap_username",
+                   "imap_password"}
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return
+        cols = ", ".join(f"{k}=?" for k in fields)
+        self._exec(f"UPDATE mail_accounts SET {cols} WHERE id=?",
+                   (*fields.values(), account_id))
+
+    def delete_mail_account(self, account_id: int) -> None:
+        """Remove one mailbox and its stored credentials."""
+        self._exec("DELETE FROM mail_accounts WHERE id=?", (account_id,))
+
     def is_email_processed(self, message_id: str) -> bool:
         """True when this message id has already been handled."""
         return bool(

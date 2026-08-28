@@ -50,7 +50,12 @@ def _app(settings, cache):
     """Public (secret-less) MSAL client for the configured Client ID."""
     import msal
 
-    client_id = settings.get("outlook.graph_client_id", "").strip()
+    from config import DEFAULT_GRAPH_CLIENT_ID
+
+    # A site may register its own app, but the shipped public-client ID means
+    # customers normally never see Azure at all.
+    client_id = (settings.get("outlook.graph_client_id", "").strip()
+                 or DEFAULT_GRAPH_CLIENT_ID)
     if not client_id:
         # A blank client ID also happens when the stored (encrypted) value can
         # no longer be decrypted, which is easy to mistake for a portal
@@ -161,8 +166,13 @@ def config_report(settings) -> str:
     Printed in the sign-in window so a bad/blank/mistyped client ID is visible
     immediately instead of being inferred from Microsoft's error pages.
     """
+    from config import DEFAULT_GRAPH_CLIENT_ID
+
     raw = settings.get("outlook.graph_client_id", "")
-    cid = (raw or "").strip()
+    # Must mirror _app(): otherwise the shipped ID reads as EMPTY here and the
+    # sign-in window refuses to start.
+    cid = (raw or "").strip() or DEFAULT_GRAPH_CLIENT_ID
+    origin = "configured" if (raw or "").strip() else "built-in"
     tenant = (settings.get("outlook.graph_tenant", "") or "common").strip() or "common"
 
     if not cid:
@@ -170,7 +180,7 @@ def config_report(settings) -> str:
     elif len(cid) != 36 or cid.count("-") != 4:
         state = f"SUSPICIOUS - {len(cid)} chars, expected a 36-char GUID: {cid!r}"
     else:
-        state = f"{cid[:8]}...{cid[-4:]}  (36-char GUID, looks valid)"
+        state = f"{cid[:8]}...{cid[-4:]}  ({origin}, looks valid)"
 
     lines = [
         f"Client ID : {state}",
@@ -185,3 +195,44 @@ def config_report(settings) -> str:
     except Exception:
         pass
     return "\n".join(lines)
+
+
+class AccountTokenStore:
+    """``settings``-shaped view whose token cache is one mailbox's own.
+
+    Every Graph mailbox needs a separate MSAL cache - one sign-in per account -
+    so the account row supplies the cache while everything else (client ID,
+    tenant) still comes from global settings.
+    """
+
+    def __init__(self, settings, db, account_id: int) -> None:
+        """Wrap global settings, redirecting the cache to this account row."""
+        self._settings = settings
+        self._db = db
+        self._account_id = account_id
+
+    def get(self, key: str, default: str = "") -> str:
+        """Read a setting, or this account's cached tokens."""
+        if key == CACHE_KEY:
+            rows = [r for r in self._db.list_mail_accounts()
+                    if r["id"] == self._account_id]
+            if not rows:
+                return ""
+            return self._settings.decrypt_value(rows[0]["graph_cache"])
+        return self._settings.get(key, default)
+
+    def set(self, key: str, value: str) -> None:
+        """Write a setting, or this account's cached tokens."""
+        if key == CACHE_KEY:
+            self._db.update_mail_account(
+                self._account_id,
+                graph_cache=self._settings.encrypt_value(value))
+            return
+        self._settings.set(key, value)
+
+    def unreadable_secrets(self) -> list[str]:
+        """Delegate, so callers can still report undecryptable settings."""
+        try:
+            return self._settings.unreadable_secrets()
+        except Exception:
+            return []

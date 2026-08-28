@@ -106,6 +106,8 @@ class SettingsTab:
         self._svc_box.pack(fill="x")
         self._acct_box = ctk.CTkFrame(self.frame, fg_color=C["bg"])
         self._acct_box.pack(fill="x")
+        self._accounts_box = ctk.CTkFrame(self.frame, fg_color=C["bg"])
+        self._accounts_box.pack(fill="x")
         self._outlook_box = ctk.CTkFrame(self.frame, fg_color=C["bg"])
         self._outlook_box.pack(fill="x")
         self._ai_box = ctk.CTkFrame(self.frame, fg_color=C["bg"])
@@ -115,6 +117,9 @@ class SettingsTab:
         self._build_updates()
         self._build_actions()
 
+        from gui.accounts_section import AccountsSection
+
+        self.accounts = AccountsSection(self._accounts_box, app, self._status)
         self.load()
 
     # -- static: deployment selectors ---------------------------
@@ -482,6 +487,8 @@ class SettingsTab:
         except Exception as exc:
             self._status.configure(text=f"Startup toggle failed: {exc}", text_color=C["red"])
             return
+        if getattr(self, "accounts", None):
+            self.accounts.save_all()
         self._app.refresh_after_settings()
         self._status.configure(text="Settings saved.", text_color=C["green"])
 

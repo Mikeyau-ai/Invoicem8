@@ -3,6 +3,26 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.32
+- **No Azure setup for customers.** InvoiceM8 now ships with its own
+  Application (client) ID, so a new site just adds an email account and clicks
+  Sign in. (Public-client IDs are not secrets - the sign-in still happens
+  against the user's own Microsoft account and there is no client secret.) A
+  site that needs its own app registration can still override it in Settings.
+- **Monitor up to 10 mailboxes.** Settings gains an "Email accounts" section
+  with "+ Add an email account". Each row has its own address, backend
+  (graph / imap / com), folder and - importantly - its own credentials: a
+  Graph sign-in token or an IMAP app password, which cannot be shared between
+  accounts. Rows can be mixed, disabled without deleting, tested individually,
+  and removed.
+- Every mailbox is scanned on the same schedule and shares the customer
+  database and duplicate checks, so the same invoice arriving at two addresses
+  is still uploaded once. A mailbox that fails is logged against its address
+  and does not stop the others being scanned.
+- Help updated: a new "Email accounts" guide, the Graph guide rewritten around
+  the no-Azure path (with the manual app registration kept as an optional
+  appendix), and the Client ID field marked optional.
+
 ## 1.0.31
 - **Fixed Google Gemini failing with 404.** Google retired `gemini-1.5-flash`,
   so every AI parse fell back to regex. The app now asks the Gemini API which

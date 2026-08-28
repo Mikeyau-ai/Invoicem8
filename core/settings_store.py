@@ -122,6 +122,18 @@ class Settings:
         """Bulk read used by the Settings tab to populate fields."""
         return {k: self.get(k) for k in keys}
 
+    def encrypt_value(self, value: str) -> str:
+        """Encrypt a secret stored OUTSIDE the settings table.
+
+        Per-mailbox credentials (Graph token cache, IMAP password) live on
+        their own rows, but must be protected by the same master key.
+        """
+        return self._box.encrypt(value or "")
+
+    def decrypt_value(self, token: str) -> str:
+        """Inverse of :meth:`encrypt_value`; "" when it cannot be decrypted."""
+        return self._box.decrypt(token) if token else ""
+
     def unreadable_secrets(self) -> list[str]:
         """Encrypted settings that no longer decrypt, so must be re-entered.
 
