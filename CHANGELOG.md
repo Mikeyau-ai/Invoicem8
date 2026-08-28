@@ -3,6 +3,17 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.19
+- Fixed Microsoft sign-in failing with "invalid_request: The provided request
+  must include a 'redirect_uri' input parameter". The app was opening MSAL's
+  verification_uri, which for personal Microsoft accounts resolves to an
+  endpoint that rejects a plain visit; it now always opens
+  microsoft.com/devicelogin.
+- The sign-in code is shown in large text in the status box AND copied to your
+  clipboard, with numbered instructions, instead of relying on the browser.
+- Sign-in no longer raises in the background if you close Settings while it is
+  still waiting.
+
 ## 1.0.18
 - Graph guide: the "no directory" step now covers the exact wording the portal
   shows ("The ability to create applications outside of a directory has been

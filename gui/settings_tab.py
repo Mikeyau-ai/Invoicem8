@@ -25,6 +25,9 @@ from integrations.registry import (
     build_provider,
 )
 
+#: Canonical device-code sign-in page (works for personal and work accounts).
+DEVICE_LOGIN_URL = "https://microsoft.com/devicelogin"
+
 # Outlook field groups keyed by backend.
 OUTLOOK_COMMON = [
     ("outlook.account", "Mailbox / account to monitor", False),
@@ -299,11 +302,25 @@ class SettingsTab:
             self._status.configure(text=str(exc), text_color=C["red"])
             return
 
-        self._status.configure(text=flow.get("message", "Follow the sign-in prompt."),
-                               text_color=C["yellow"])
-        try:                                    # convenience: open the page
+        # Always send the browser to the canonical device-login page. MSAL's
+        # verification_uri can point at an endpoint that rejects a bare visit
+        # for personal Microsoft accounts ("must include a redirect_uri").
+        code = flow.get("user_code", "")
+        try:                                    # put the code on the clipboard
+            self._app.clipboard_clear()
+            self._app.clipboard_append(code)
+        except Exception:
+            pass
+        self._status.configure(
+            text=("SIGN-IN CODE:  " + code + "   (copied to clipboard)\n"
+                  "1. Your browser is opening " + DEVICE_LOGIN_URL + "\n"
+                  "2. Enter the code above, then sign in as the mailbox account.\n"
+                  "3. Approve the permission request.\n"
+                  "Waiting for you to finish - this box updates when done."),
+            text_color=C["yellow"])
+        try:
             import webbrowser
-            webbrowser.open(flow.get("verification_uri", "https://microsoft.com/devicelogin"))
+            webbrowser.open(DEVICE_LOGIN_URL)
         except Exception:
             pass
 
@@ -313,8 +330,14 @@ class SettingsTab:
                 msg, colour = f"Signed in to Microsoft as {who}.", C["green"]
             except Exception as exc:
                 msg, colour = str(exc), C["red"]
-            self._app.after(0, lambda: (self._status.configure(text=msg, text_color=colour),
-                                        self._render()))
+            # The user may close Settings (or the app) while sign-in is
+            # pending, so scheduling onto Tk can fail - never crash the thread.
+            try:
+                self._app.after(0, lambda: (self._status.configure(text=msg,
+                                                                   text_color=colour),
+                                            self._render()))
+            except Exception:
+                pass
 
         threading.Thread(target=work, daemon=True, name="graph-signin").start()
 
