@@ -3,6 +3,14 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.17
+- Graph setup guide rewritten against the CURRENT portal: sign-in is at
+  entra.microsoft.com (not portal.azure.com), and the account-type option is
+  now labelled "Any Entra ID Tenant + Personal Microsoft accounts". Adds the
+  "Allow public client flows" step that device-code sign-in requires, and
+  tells you to check entra.microsoft.com first before assuming you need to
+  sign up for Azure.
+
 ## 1.0.16
 - **New IMAP backend** (Settings > Email > Backend = `imap`). Works with
   Gmail, Fastmail, Yahoo, iCloud, Zoho and most business/cPanel mail hosts
