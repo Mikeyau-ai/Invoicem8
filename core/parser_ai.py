@@ -34,10 +34,22 @@ Return ONLY minified JSON with these keys:
   invoice_ref    - the invoice / credit note number, else ""
   amount_total   - total incl. tax as a number string, else ""
   invoice_date   - ISO date if present, else ""
-  doc_type       - "credit" if this is a credit note / adjustment note / credit
-                   memo / refund, otherwise "invoice"
+  doc_type       - "credit" if this is a CREDIT of any kind (credit note,
+                   credit memo, adjustment note, credit invoice, refund),
+                   otherwise "invoice". The word "credit" is the deciding
+                   signal - but ignore ordinary payment wording such as
+                   "credit card", "credit terms" or "credit limit", which
+                   appears on normal invoices.
   confidence     - 0..1 float, your confidence in customer_name
 Do not include commentary. If unknown, use "".
+
+Suppliers label these fields inconsistently. Treat all of these as the
+INVOICE reference: "Invoice No/Number/#/ID", "Tax Invoice", "Inv", "Bill No",
+"Document No", "Statement No", "Our Ref", "Your Ref", "Reference".
+Treat all of these as the JOB number: "Job", "Job No/Number/Ref", "Work
+Order", "W/O", "Service Order", "Service Call", "Ticket", "Order No",
+"Purchase Order"/"PO". If both a job number and a purchase order appear,
+prefer the one labelled as a job.
 
 The ATTACHMENT FILE NAMES are a strong hint: invoice PDFs are often named
 like "Customer10160.pdf", "INV-1042_Customer.pdf" or "10160 Testco.pdf" - a
@@ -216,6 +228,35 @@ def _from_filename(names: str) -> tuple[str, str]:
     return "", ""
 
 
+#: Phrases where "credit" is ordinary invoice wording, not a credit note -
+#: e.g. "payment by credit card", "credit terms 30 days", "credit limit".
+_CREDIT_FALSE_FRIENDS = re.compile(
+    r"\bcredit\s*(?:card|limit|terms?|account|application|check|rating|"
+    r"control|hold|balance|facility|score|union|available)\b", re.I)
+
+#: Unambiguous credit-document wording.
+_CREDIT_STRONG = re.compile(
+    r"\bcredit\s*(?:note|memo|invoice|adjustment|advice)\b"
+    r"|\badjustment\s*note\b"
+    r"|\bcredit\s*not[ei]\b"
+    r"|\brefund\b"
+    r"|\bRCTI\s*credit\b", re.I)
+
+
+def _looks_like_credit(blob: str) -> bool:
+    """True when the document is a credit rather than an invoice.
+
+    "Credit" is the one label that stays consistent across suppliers, so treat
+    it as the deciding signal - but only after removing the phrases where
+    "credit" is just payment wording on a normal invoice.
+    """
+    if _CREDIT_STRONG.search(blob):
+        return True
+    # Plain "credit" still counts, once the false friends are stripped out.
+    cleaned = _CREDIT_FALSE_FRIENDS.sub(" ", blob)
+    return bool(re.search(r"\bcredits?\b", cleaned, re.I))
+
+
 def _regex_fallback(subject: str, body: str, attachment: str,
                     filenames: str = "") -> ParseResult:
     """Cheap heuristic extraction when AI is unavailable."""
@@ -223,34 +264,59 @@ def _regex_fallback(subject: str, body: str, attachment: str,
     # \b anchors stop "Invoice" itself being consumed as "inv" + "oice", and
     # the label words are skipped so "Job Reference: 10160" yields 10160 rather
     # than the word "Reference".
-    _LABEL = r"(?:\s*(?:reference|ref|no|number|num|#|:|-)\.?)*\s*"
+    # Trade invoices label these fields inconsistently, so match a broad
+    # vocabulary rather than one phrasing. Ordered most- to least-specific:
+    # an explicit "Job No" should win over a generic "Reference".
+    _SEP = r"[\s.:#=\-]{0,4}"
+    # A reference always contains a digit; allow an alpha prefix (INV-1042),
+    # slashes and hyphens (WO/2026-14).
+    _VALUE = r"([A-Za-z]{0,5}[-/ ]?\d[A-Za-z0-9\-/]*)"
 
-    def _first_numeric(pattern: str):
-        """First match whose captured value contains a digit.
+    _JOB_LABELS = [
+        r"job\s*(?:no|number|num|id|ref(?:erence)?|#)",
+        r"\bjob\b",
+        r"work\s*order\s*(?:no|number|num|#)?",
+        r"\bw[/.]?o\b\s*(?:no|number|#)?",
+        r"service\s*(?:order|call|ticket|job)\s*(?:no|number|#)?",
+        r"ticket\s*(?:no|number|#)?",
+        r"(?:purchase\s*order|\bp[./]?o\b)\s*(?:no|number|num|#)?",
+        r"order\s*(?:no|number|num|#)",
+        r"site\s*ref(?:erence)?\s*(?:no|number|#)?",
+    ]
+    _INV_LABELS = [
+        r"tax\s*invoice\s*(?:no|number|num|id|#)?",
+        r"credit\s*note\s*(?:no|number|num|#)?",
+        r"invoice\s*(?:no|number|num|id|#)",
+        r"\binvoice\b",
+        r"\binv\b\s*(?:no|number|#)?",
+        r"bill\s*(?:no|number|num|#)",
+        r"(?:document|doc)\s*(?:no|number|num|#)",
+        r"statement\s*(?:no|number|#)",
+        r"(?:our|your|customer|client)\s*ref(?:erence)?\s*(?:no|number|#)?",
+        r"\bref(?:erence)?\b\s*(?:no|number|#)?",
+    ]
 
-        Reference numbers always contain digits, so this skips a neighbouring
-        word (e.g. "Invoice" followed by "Job") instead of capturing it.
-        """
-        for m in re.finditer(pattern, blob, re.I):
-            if any(ch.isdigit() for ch in m.group(1)):
-                return m
-        return None
+    def _find_labelled(labels: list[str]) -> str:
+        """First value whose label matches, trying labels in priority order."""
+        for label in labels:
+            for m in re.finditer(label + _SEP + _VALUE, blob, re.I):
+                value = m.group(1).strip(" -/")
+                if any(ch.isdigit() for ch in value):
+                    return value
+        return ""
 
-    job = _first_numeric(r"\b(?:job|work\s*order|w/?o)\b" + _LABEL
-                         + r"([A-Za-z0-9][A-Za-z0-9-]{2,})")
-    inv = _first_numeric(r"\b(?:invoice|inv|tax\s*invoice)\b" + _LABEL
-                         + r"([A-Za-z0-9][A-Za-z0-9-]{2,})")
+    job_number = _find_labelled(_JOB_LABELS)
+    invoice_ref = _find_labelled(_INV_LABELS)
     cust = re.search(r"(?:bill\s*to|customer|client|to)\s*[:\-]\s*(.+)", blob, re.I)
-    is_credit = re.search(r"credit\s*note|adjustment\s*note|credit\s*memo|\brefund\b",
-                          blob, re.I)
+    is_credit = _looks_like_credit(blob)
 
     fn_name, fn_num = _from_filename(filenames)
     customer = (cust.group(1).splitlines()[0].strip() if cust else "") or fn_name
-    job_number = (job.group(1) if job else "") or fn_num
+    job_number = job_number or fn_num
     return ParseResult(
         customer_name=customer,
         job_number=job_number,
-        invoice_ref=(inv.group(1) if inv else ""),
+        invoice_ref=invoice_ref,
         doc_type="credit" if is_credit else "invoice",
         confidence=0.5 if (customer and job_number) else (0.2 if customer else 0.0),
         source="regex+filename" if (fn_name or fn_num) else "regex",

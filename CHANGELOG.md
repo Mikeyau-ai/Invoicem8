@@ -3,6 +3,20 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.29
+- Reference parsing now understands how suppliers actually label these fields
+  instead of one fixed phrasing. Invoice side: Invoice No/Number/#/ID, Tax
+  Invoice, Inv, Bill No, Document No, Statement No, Our Ref, Your Ref,
+  Reference. Job side: Job (No/Number/Ref), Work Order, W/O, Service
+  Order/Call, Ticket, Order No, Purchase Order/PO - matched most-specific
+  first, so an explicit "Job No" beats a generic "Reference".
+- **Credit detection now keys on the word "credit"**, which is the one label
+  that stays consistent across suppliers - while ignoring ordinary invoice
+  wording like "credit card", "credit terms" and "credit limit" so a normal
+  invoice is never misfiled as a credit.
+- The AI prompt was given the same vocabulary, so both the model and the
+  regex fallback read invoices the same way.
+
 ## 1.0.28
 - **Fixed queued invoices never uploading after you add the customer.** New
   pending rows were written with an empty status, but the replay looked for
