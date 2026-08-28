@@ -116,8 +116,9 @@ class Watcher:
         allowed_ext = set()  # per-customer filtering happens in the router
         messages = backend.fetch(since=since, unread_only=unread_only, allowed_ext=allowed_ext)
         if not messages:
-            if not back_check:
-                self._emit(level="INFO", action="poll", message="No new invoice emails.")
+            detail = getattr(backend, "last_scan", "") or "No new emails."
+            self._emit(level="INFO", action="poll",
+                       message=f"Nothing to process. {detail}")
             return
 
         for msg in sorted(messages, key=lambda m: m.received_at):

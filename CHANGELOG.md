@@ -3,6 +3,22 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.11
+- Outlook COM: if `Outlook.Application` can't be reached (which is always the
+  case with the NEW Outlook for Windows Store app - it has no COM interface)
+  the error now says exactly that and points at the fix, instead of a raw
+  "Invalid class string" COM code.
+- Watcher: "no new invoice emails" now reports what was actually scanned -
+  which account and folder, how many emails were in the window, how many were
+  skipped as already-read, and how many had no matching attachment.
+- Attachment file names are now preserved (each message gets its own cache
+  folder) and passed to the parser. A file like `testco10160.pdf` alone is
+  enough to identify customer "testco" and job 10160.
+- COM first scan looks back 14 days instead of the entire mailbox.
+- "Only process unread emails" now defaults to OFF - duplicates are prevented
+  by message-id, so the read flag was an unnecessary way to miss invoices.
+- Test Outlook reports the same scan detail and honours the unread toggle.
+
 ## 1.0.10
 - ServiceM8: authenticate with the `X-API-Key` header (the documented method
   for Private Application keys) instead of HTTP Basic auth. Basic auth made

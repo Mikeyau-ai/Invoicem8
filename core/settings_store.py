@@ -58,7 +58,7 @@ DEFAULTS = {
     "ai.model": "",                       # blank -> provider default
     "ai.compat_base_url": "http://localhost:11434/v1",  # OpenAI-compatible endpoint
     "watcher.poll_minutes": "5",
-    "watcher.unread_only": "1",
+    "watcher.unread_only": "0",   # dedupe is by message-id, not the read flag
     "watcher.autostart": "0",             # start watcher when app opens
     "app.run_on_startup": "0",
 }

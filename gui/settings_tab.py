@@ -90,7 +90,9 @@ class SettingsTab:
                      text_color=C["text"], width=250, anchor="w").pack(side="left")
         self._poll = ctk.CTkEntry(wrap, width=80)
         self._poll.pack(side="left")
-        self._unread_only = ctk.CTkSwitch(self.frame, text="Only process unread emails")
+        self._unread_only = ctk.CTkSwitch(
+            self.frame,
+            text="Only process UNREAD emails  (off = every invoice since the last check)")
         self._unread_only.pack(anchor="w", padx=6, pady=4)
         self._autostart = ctk.CTkSwitch(self.frame, text="Start watcher automatically on app launch")
         self._autostart.pack(anchor="w", padx=6, pady=4)
@@ -315,9 +317,13 @@ class SettingsTab:
     def _test_outlook(self) -> None:
         self._save()
         try:
-            msgs = build_backend(self._settings).fetch(since=None, unread_only=True, allowed_ext=set())
-            self._status.configure(text=f"Outlook OK - {len(msgs)} unread with attachments.",
-                                   text_color=C["green"])
+            backend = build_backend(self._settings)
+            msgs = backend.fetch(since=None, unread_only=self._unread_only.get() == 1,
+                                 allowed_ext=set())
+            detail = getattr(backend, "last_scan", "") or f"{len(msgs)} message(s) found."
+            self._status.configure(
+                text=f"Outlook OK - {detail}",
+                text_color=C["green"] if msgs else C["yellow"])
         except Exception as exc:
             self._status.configure(text=f"Outlook error: {exc}", text_color=C["red"])
 

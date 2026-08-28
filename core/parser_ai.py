@@ -39,8 +39,15 @@ Return ONLY minified JSON with these keys:
   confidence     - 0..1 float, your confidence in customer_name
 Do not include commentary. If unknown, use "".
 
+The ATTACHMENT FILE NAMES are a strong hint: invoice PDFs are often named
+like "Customer10160.pdf", "INV-1042_Customer.pdf" or "10160 Testco.pdf" - a
+run of letters is usually the customer and a run of 3+ digits is usually the
+job number or invoice number. Use them when the text is sparse or scanned.
+
 --- EMAIL SUBJECT ---
 {subject}
+--- ATTACHMENT FILE NAMES ---
+{filenames}
 --- EMAIL BODY ---
 {body}
 --- ATTACHMENT TEXT ---
@@ -195,9 +202,24 @@ def _coerce_json(text: str) -> dict:
 # --------------------------------------------------------------------------
 # Regex fallback
 # --------------------------------------------------------------------------
-def _regex_fallback(subject: str, body: str, attachment: str) -> ParseResult:
+def _from_filename(names: str) -> tuple[str, str]:
+    """Pull (customer, number) from a filename like 'testco10160.pdf' or
+    '10160 Testco.pdf' / 'INV-1042_Acme.pdf'. Returns ('', '') if nothing fits."""
+    for raw in names.splitlines():
+        stem = re.sub(r"\.(pdf|docx?|csv|xlsx?|png|jpe?g)$", "", raw.strip(), flags=re.I)
+        stem = re.sub(r"\b(inv(oice)?|invoice|bill)\b", " ", stem, flags=re.I)
+        letters = re.search(r"[A-Za-z][A-Za-z&' ]{1,}[A-Za-z]", stem)
+        digits = re.search(r"\d{3,}", stem)
+        if letters or digits:
+            name = re.sub(r"[_\-]+", " ", letters.group(0)).strip() if letters else ""
+            return name, (digits.group(0) if digits else "")
+    return "", ""
+
+
+def _regex_fallback(subject: str, body: str, attachment: str,
+                    filenames: str = "") -> ParseResult:
     """Cheap heuristic extraction when AI is unavailable."""
-    blob = f"{subject}\n{body}\n{attachment}"
+    blob = f"{subject}\n{body}\n{attachment}\n{filenames}"
     job = re.search(r"(?:job|work\s*order|wo|job\s*no\.?|job\s*#)\s*[:#]?\s*([A-Za-z0-9-]{3,})",
                     blob, re.I)
     inv = re.search(r"(?:invoice|inv)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Za-z0-9-]{3,})",
@@ -205,13 +227,17 @@ def _regex_fallback(subject: str, body: str, attachment: str) -> ParseResult:
     cust = re.search(r"(?:bill\s*to|customer|client|to)\s*[:\-]\s*(.+)", blob, re.I)
     is_credit = re.search(r"credit\s*note|adjustment\s*note|credit\s*memo|\brefund\b",
                           blob, re.I)
+
+    fn_name, fn_num = _from_filename(filenames)
+    customer = (cust.group(1).splitlines()[0].strip() if cust else "") or fn_name
+    job_number = (job.group(1) if job else "") or fn_num
     return ParseResult(
-        customer_name=(cust.group(1).splitlines()[0].strip() if cust else ""),
-        job_number=(job.group(1) if job else ""),
+        customer_name=customer,
+        job_number=job_number,
         invoice_ref=(inv.group(1) if inv else ""),
         doc_type="credit" if is_credit else "invoice",
-        confidence=0.2 if cust else 0.0,
-        source="regex",
+        confidence=0.5 if (customer and job_number) else (0.2 if customer else 0.0),
+        source="regex+filename" if (fn_name or fn_num) else "regex",
     )
 
 
@@ -224,6 +250,7 @@ class InvoiceParser:
     def parse(self, subject: str, body: str, attachments: list[Path]) -> ParseResult:
         """Run extraction over one email + its attachments."""
         attachment_text = "\n\n".join(extract_text(p) for p in attachments)[:12000]
+        filenames = "\n".join(p.name for p in attachments)
         provider = self._settings.get("ai.provider", "gemini")
         meta = AI_PROVIDERS.get(provider, AI_PROVIDERS["gemini"])
         model = self._settings.get("ai.model", "")
@@ -233,7 +260,7 @@ class InvoiceParser:
         # Local / compatible servers may not need a key; everyone else does.
         if key or not meta["needs_key"]:
             prompt = _PROMPT.format(subject=subject, body=body[:6000],
-                                    attachment=attachment_text)
+                                    attachment=attachment_text, filenames=filenames)
             try:
                 if provider == "openai":
                     raw = _call_openai_chat(key, model, prompt)
@@ -259,4 +286,4 @@ class InvoiceParser:
             except Exception as exc:
                 log.error("AI parse failed (%s); using regex fallback: %s", provider, exc)
 
-        return _regex_fallback(subject, body, attachment_text)
+        return _regex_fallback(subject, body, attachment_text, filenames)
