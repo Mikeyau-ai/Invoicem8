@@ -3,6 +3,14 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.27
+- New-customer prompt: the window was too small, so the Add / Skip buttons
+  were cut off and the form could not be scrolled. It is now larger,
+  resizable, adapts to the screen height, scrolls, and pins the buttons to the
+  bottom where they can never be pushed off.
+- It no longer offers a meaningless "Enable None / Disabled upload" toggle -
+  the accounting row only appears when an accounting system is selected.
+
 ## 1.0.26
 - **Fixed "InefficientFilter: The restriction or sort order is too complex for
   this operation"** from Microsoft Graph. Graph refuses to filter on
