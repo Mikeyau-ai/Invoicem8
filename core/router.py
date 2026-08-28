@@ -190,10 +190,9 @@ class Router:
                     platform=result.platform, remote_id=result.remote_id,
                     filename=ctx.file_path.name)
                 msg = f"[{kind}] {result.detail}"
-                self._db.add_activity(
-                    level="INFO", customer_name=ctx.customer_name,
-                    invoice_ref=ctx.invoice_ref, platform=result.platform,
-                    action="uploaded", filename=ctx.file_path.name, message=msg)
+                # Only emit: the GUI's emit_event() persists every non-error
+                # event, so writing the row here as well logged each upload
+                # twice. Every other event in this class emits only.
                 self._emit(level="INFO", customer_name=ctx.customer_name,
                            invoice_ref=ctx.invoice_ref, platform=result.platform,
                            action="uploaded", filename=ctx.file_path.name, message=msg)

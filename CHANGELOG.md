@@ -56,6 +56,12 @@ See `plan.md` for the findings this implements.
 - Every function, method and class in the codebase now carries a purpose
   docstring (148 were missing).
 
+## 1.0.30
+- Fixed every successful upload being written to the Activity Log twice. The
+  router wrote the row itself and also emitted the event, and the GUI persists
+  emitted events - so one upload produced two identical "uploaded" lines. The
+  upload itself only ever happened once; only the log was doubled.
+
 ## 1.0.29
 - Reference parsing now understands how suppliers actually label these fields
   instead of one fixed phrasing. Invoice side: Invoice No/Number/#/ID, Tax
