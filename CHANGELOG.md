@@ -3,6 +3,15 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.26
+- **Fixed "InefficientFilter: The restriction or sort order is too complex for
+  this operation"** from Microsoft Graph. Graph refuses to filter on
+  hasAttachments while sorting by date. The mailbox query now tries
+  progressively simpler server-side queries and applies the remaining
+  narrowing (attachments, unread, date) locally, so a rejected filter can
+  never stop invoices being found.
+- Graph scan report says which server query actually succeeded.
+
 ## 1.0.25
 - **Fixed "that code didn't work" at the sign-in page.** A device code is only
   redeemable at the verification URI belonging to the authority that issued

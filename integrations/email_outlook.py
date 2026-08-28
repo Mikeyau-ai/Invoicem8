@@ -288,28 +288,62 @@ class GraphBackend(OutlookBackend):
         # /me is the signed-in mailbox. A different address only works with an
         # org tenant plus admin consent, so only use it when explicitly set.
         base = f"{self.GRAPH}/users/{self._account}" if self._account else f"{self.GRAPH}/me"
-        params = {
-            "$top": "50",
-            "$orderby": "receivedDateTime desc",
-            "$select": "id,subject,from,receivedDateTime,isRead,bodyPreview,hasAttachments,body",
-        }
-        filters = ["hasAttachments eq true"]
-        if unread_only:
-            filters.append("isRead eq false")
-        if since:
-            filters.append(f"receivedDateTime ge {since.astimezone(timezone.utc).isoformat()}")
-        params["$filter"] = " and ".join(filters)
-
+        select = ("id,subject,from,receivedDateTime,isRead,"
+                  "hasAttachments,body")
         url = f"{base}/mailFolders/{self._folder}/messages"
-        resp = requests.get(url, headers=headers, params=params, timeout=30)
-        if resp.status_code == 404:
-            raise RuntimeError(
-                f"Graph could not find folder '{self._folder}'. Use a well-known "
-                "name like Inbox, or the exact display name of a sub-folder.")
-        if not resp.ok:
-            raise RuntimeError(f"Graph error {resp.status_code}: {resp.text[:300]}")
 
-        value = resp.json().get("value", [])
+        # Graph rejects some filter+sort combinations outright with
+        # "InefficientFilter: The restriction or sort order is too complex for
+        # this operation" - notably filtering on hasAttachments while sorting
+        # by receivedDateTime. Try progressively simpler queries and do the
+        # remaining narrowing locally; correctness never depends on the server
+        # honouring the filter.
+        since_iso = (since.astimezone(timezone.utc).isoformat()
+                     if since else None)
+        attempts: list[dict] = []
+        if since_iso:
+            f = [f"receivedDateTime ge {since_iso}"]
+            if unread_only:
+                f.append("isRead eq false")
+            attempts.append({"$top": "100", "$select": select,
+                             "$filter": " and ".join(f)})
+        if unread_only:
+            attempts.append({"$top": "100", "$select": select,
+                             "$filter": "isRead eq false"})
+        # Last resort: newest N, filtered entirely on this side.
+        attempts.append({"$top": "100", "$select": select,
+                         "$orderby": "receivedDateTime desc"})
+
+        value = None
+        used: dict = {}
+        last_err = ""
+        for params in attempts:
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            if resp.status_code == 404:
+                raise RuntimeError(
+                    f"Graph could not find folder '{self._folder}'. Use a "
+                    "well-known name like Inbox, or the exact display name of "
+                    "a sub-folder.")
+            if resp.ok:
+                value, used = resp.json().get("value", []), params
+                break
+            last_err = f"{resp.status_code}: {resp.text[:200]}"
+            log.warning("Graph query rejected (%s); trying a simpler one.",
+                        last_err)
+        if value is None:
+            raise RuntimeError(f"Graph error {last_err}")
+
+        # Apply locally whatever the server was not asked to enforce.
+        params = used
+        applied = used.get("$filter", "")
+        if "hasAttachments" not in applied:
+            value = [m for m in value if m.get("hasAttachments")]
+        if unread_only and "isRead" not in applied:
+            value = [m for m in value if not m.get("isRead", True)]
+        if since and "receivedDateTime" not in applied:
+            value = [m for m in value
+                     if datetime.fromisoformat(
+                         m["receivedDateTime"].replace("Z", "+00:00")) > since]
         results: list[EmailMessage] = []
         for msg in value:
             received_dt = datetime.fromisoformat(
@@ -329,13 +363,15 @@ class GraphBackend(OutlookBackend):
             ))
         who = self._account or "the signed-in mailbox"
         self.last_scan = (
-            f"Graph: folder '{self._folder}' of {who}. "
-            f"{len(value)} message(s) matched [{params['$filter']}]; "
-            f"{len(results)} had a usable attachment and are queued."
+            f"Graph: folder '{self._folder}' of {who}. Server query "
+            f"[{used.get('$filter') or used.get('$orderby', 'newest 100')}]; "
+            f"{len(value)} message(s) with an attachment in range; "
+            f"{len(results)} queued for processing."
         )
         if not value:
-            self.last_scan += (" Nothing matched - the filter requires an "
-                               "ATTACHMENT, so plain emails are ignored.")
+            self.last_scan += (" Nothing matched - only emails WITH "
+                               "attachments are processed, and only those "
+                               "newer than the last check.")
         return results
 
     def _download_attachments(self, base, msg_id, headers, allowed_ext, requests):
