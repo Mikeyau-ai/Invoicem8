@@ -63,9 +63,11 @@ class App(ctk.CTk):
         self._build_header()
         self._build_tabs()
 
+        # No on_new_customer callback: unknown suppliers are added
+        # automatically by the router and flagged NEW in the Customers tab,
+        # rather than interrupting with a modal per invoice.
         self.watcher = Watcher(
             db, settings,
-            on_new_customer=lambda name, pid: self._new_customers.put((name, pid)),
             emit=self.emit_event,
             on_status=lambda running: None if self._closing
             else self.after(0, self._set_status, running),

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS customers (
     servicem8_client_uuid TEXT NOT NULL DEFAULT '',
     accounting_contact_id TEXT NOT NULL DEFAULT '',
     notes                 TEXT NOT NULL DEFAULT '',
+    reviewed              INTEGER NOT NULL DEFAULT 1,  -- 0 = auto-added, unseen
     created_at            TEXT NOT NULL,
     updated_at           TEXT NOT NULL
 );
@@ -176,7 +177,24 @@ class Database:
             self._conn.execute("PRAGMA foreign_keys=ON;")
             self._conn.executescript(SCHEMA)
             self._conn.commit()
+        self._migrate()
         self._rebuild_alias_index()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created.
+
+        SQLite has no "ADD COLUMN IF NOT EXISTS", and CREATE TABLE IF NOT
+        EXISTS silently leaves an existing table alone, so new columns have to
+        be applied explicitly.
+        """
+        with self._lock:
+            have = {r["name"] for r in
+                    self._conn.execute("PRAGMA table_info(customers)")}
+            if "reviewed" not in have:
+                # Existing customers were added deliberately, so mark them seen.
+                self._conn.execute("ALTER TABLE customers ADD COLUMN "
+                                   "reviewed INTEGER NOT NULL DEFAULT 1")
+                self._conn.commit()
 
     # -- low level helpers -------------------------------------------------
     def _exec(self, sql: str, params: Iterable[Any] = ()):
@@ -221,6 +239,34 @@ class Database:
         return {r["key"]: r for r in self._query("SELECT * FROM settings")}
 
     # -- customers ----------------------------------------------------
+    #: Orderings offered by the Customers tab.
+    CUSTOMER_SORTS = {
+        "Name (A-Z)": "name COLLATE NOCASE ASC",
+        "Name (Z-A)": "name COLLATE NOCASE DESC",
+        "Newest first": "created_at DESC, id DESC",
+        "Oldest first": "created_at ASC, id ASC",
+        "New / unreviewed first": "reviewed ASC, created_at DESC",
+    }
+
+    def list_customers_sorted(self, sort: str = "Name (A-Z)",
+                              new_only: bool = False) -> list[sqlite3.Row]:
+        """Customers in the requested order, optionally only unreviewed ones."""
+        order = self.CUSTOMER_SORTS.get(sort, self.CUSTOMER_SORTS["Name (A-Z)"])
+        sql = "SELECT * FROM customers"
+        if new_only:
+            sql += " WHERE reviewed=0"
+        return self._query(f"{sql} ORDER BY {order}")
+
+    def count_unreviewed_customers(self) -> int:
+        """How many auto-added customers have not been reviewed yet."""
+        rows = self._query("SELECT COUNT(*) AS n FROM customers WHERE reviewed=0")
+        return int(rows[0]["n"]) if rows else 0
+
+    def mark_customer_reviewed(self, customer_id: int, reviewed: bool = True) -> None:
+        """Clear (or restore) the 'new' badge on one customer."""
+        self._exec("UPDATE customers SET reviewed=? WHERE id=?",
+                   (1 if reviewed else 0, customer_id))
+
     def list_customers(self) -> list[sqlite3.Row]:
         """All customer profiles, ordered by name."""
         return self._query("SELECT * FROM customers ORDER BY name COLLATE NOCASE")
@@ -315,6 +361,10 @@ class Database:
             notes=data.get("notes", ""),
             updated_at=now,
         )
+        # Only set on insert (or when explicitly passed) so editing a customer
+        # in the UI never silently re-flags it as new.
+        if "reviewed" in data:
+            fields["reviewed"] = int(bool(data["reviewed"]))
         cid = data.get("id")
         if cid:
             cols = ", ".join(f"{k}=?" for k in fields)

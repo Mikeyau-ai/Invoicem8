@@ -3,6 +3,20 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.33
+- **New suppliers are added automatically instead of prompting.** A modal per
+  unknown supplier does not scale once the AI is reading real mail, so an
+  unrecognised name is now added silently and routed straight away. Defaults:
+  Service system upload ON, Accounting system upload OFF (a deliberate,
+  per-customer decision), PDF only.
+- **Customers tab shows which ones are new.** Auto-added suppliers appear as
+  "* NEW" in yellow until reviewed, with a sort selector (Name A-Z / Z-A,
+  Newest or Oldest added, New-first), a "Show new only" switch and a counter.
+  Opening a customer and clicking Save is what marks it reviewed.
+- An invoice whose customer name cannot be read at all is still held rather
+  than guessed - it lands in the Error Log to retry once the customer exists.
+- New in-app guide explaining all of the above (the "?" beside Customers).
+
 ## 1.0.32
 - **No Azure setup for customers.** InvoiceM8 now ships with its own
   Application (client) ID, so a new site just adds an email account and clicks

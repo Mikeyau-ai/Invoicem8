@@ -30,10 +30,36 @@ class CustomersTab:
         left = ctk.CTkFrame(root, fg_color=C["panel"], width=250)
         left.pack(side="left", fill="y", padx=(0, 8), pady=0)
         left.pack_propagate(False)
-        ctk.CTkLabel(left, text="Customers", font=FONT_HEAD,
-                     text_color=C["blue"]).pack(anchor="w", padx=10, pady=8)
+        head = ctk.CTkFrame(left, fg_color=C["panel"])
+        head.pack(fill="x", padx=10, pady=8)
+        ctk.CTkLabel(head, text="Customers", font=FONT_HEAD,
+                     text_color=C["blue"]).pack(side="left")
+        accent_button(ctk, head, "?", self._guide, colour=C["btn_off"],
+                      width=28, height=24).pack(side="right")
         accent_button(ctk, left, "+ New customer", self._new,
                       colour=C["green"]).pack(fill="x", padx=10, pady=(0, 6))
+        # Suppliers are added automatically, so the list needs ordering and a
+        # way to see just the ones nobody has looked at yet.
+        from core.database import Database as _Db
+
+        sort_row = ctk.CTkFrame(left, fg_color=C["panel"])
+        sort_row.pack(fill="x", padx=10, pady=(0, 4))
+        ctk.CTkLabel(sort_row, text="Sort", font=FONT_UI,
+                     text_color=C["dim"]).pack(side="left", padx=(0, 6))
+        self._sort = ctk.CTkOptionMenu(sort_row, width=170,
+                                       values=list(_Db.CUSTOMER_SORTS),
+                                       command=lambda _v: self.refresh())
+        self._sort.set("New / unreviewed first")
+        self._sort.pack(side="left")
+
+        self._new_only = ctk.CTkSwitch(left, text="Show new only",
+                                       command=self.refresh)
+        self._new_only.pack(anchor="w", padx=10, pady=(0, 6))
+
+        self._count = ctk.CTkLabel(left, text="", font=FONT_UI,
+                                   text_color=C["dim"], anchor="w")
+        self._count.pack(anchor="w", padx=10, pady=(0, 4))
+
         self._list = ctk.CTkScrollableFrame(left, fg_color=C["panel"])
         self._list.pack(fill="both", expand=True, padx=6, pady=6)
 
@@ -43,6 +69,13 @@ class CustomersTab:
         self._form = right
         self._build_form()
         self.refresh()
+
+    def _guide(self) -> None:
+        """Explain how suppliers get added and what NEW means."""
+        from gui.help_content import SETUP_GUIDES
+        from gui.help_dialog import GuideWindow
+
+        GuideWindow(self._app, [("customers", SETUP_GUIDES["customers"])])
 
     # -- list -----------------------------------------------------
     def refresh(self) -> None:
@@ -55,16 +88,27 @@ class CustomersTab:
         self._sm8.configure(text=f"Enable {svc_label} upload (Service system)")
         self._acct.configure(text=f"Enable {acct_label} upload (Accounting system)")
 
-        for row in self._db.list_customers():
+        rows = self._db.list_customers_sorted(self._sort.get(),
+                                              new_only=bool(self._new_only.get()))
+        unreviewed = self._db.count_unreviewed_customers()
+        self._count.configure(
+            text=(f"{len(rows)} shown  ·  {unreviewed} new" if unreviewed
+                  else f"{len(rows)} shown"),
+            text_color=C["yellow"] if unreviewed else C["dim"])
+
+        for row in rows:
             tags = []
             if row["servicem8_enabled"]:
                 tags.append(svc_label)          # resolved once, above the loop
             if row["accounting_enabled"]:
                 tags.append(acct_label)
-            label = f"{row['name']}  ·  {'/'.join(tags) or 'off'}"
+            is_new = not row["reviewed"]
+            label = (f"{'* NEW  ' if is_new else ''}{row['name']}"
+                     f"  ·  {'/'.join(tags) or 'off'}")
             btn = ctk.CTkButton(self._list, text=label, anchor="w",
                                 fg_color=C["row"], hover_color=C["select"],
-                                text_color=C["text"], font=FONT_UI,
+                                text_color=C["yellow"] if is_new else C["text"],
+                                font=FONT_UI,
                                 command=lambda r=row: self._load(r["id"]))
             btn.pack(fill="x", pady=2)
 
@@ -171,6 +215,9 @@ class CustomersTab:
             self._status.configure(text="Name is required.", text_color=C["red"])
             return
         try:
+            # Saving IS the review: opening an auto-added supplier, checking
+            # its toggles and saving clears the NEW badge.
+            data["reviewed"] = True
             self._current_id = self._db.upsert_customer(data)
             self.refresh()
             self._status.configure(text="Saved.", text_color=C["green"])

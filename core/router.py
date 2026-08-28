@@ -2,8 +2,11 @@
 
 Rules (from the spec):
   * Match extracted customer name against the local DB (name + aliases).
-  * Unknown customer -> queue as ``pending_invoices`` and raise a UI prompt
-    via the ``on_new_customer`` callback; routing for that invoice pauses.
+  * Unknown customer -> added automatically, flagged as unreviewed (NEW in
+    the Customers tab) and routed straight away. Defaults: Service system ON,
+    Accounting system OFF, PDF only. An invoice with no readable customer name
+    is queued in ``pending_invoices`` instead, since there is nothing to file
+    it under.
   * Known customer -> for each enabled toggle, call the matching provider:
       - servicem8_enabled  -> the selected Service system
       - accounting_enabled -> the selected Accounting system
@@ -74,8 +77,12 @@ class Router:
         customer = self._db.find_customer_by_name(parsed.customer_name)
 
         if customer is None:
+            customer = self._auto_add_customer(parsed, sender)
+        if customer is None:
+            # Only reachable when no name could be parsed at all - there is
+            # nothing to file the invoice under, so hold it for a human.
             for path in attachments:
-                pid = self._db.add_pending(
+                self._db.add_pending(
                     extracted_name=parsed.customer_name,
                     job_number=parsed.job_number,
                     invoice_ref=parsed.invoice_ref,
@@ -84,25 +91,18 @@ class Router:
                     file_path=str(path),
                     raw_json=json.dumps(parsed.as_dict()),
                 )
-                self._emit(level="WARN", customer_name=parsed.customer_name,
+                self._emit(level="WARN", customer_name="(unknown)",
                            invoice_ref=parsed.invoice_ref, platform="-",
-                           action="queued",
-                           message=f"Unknown customer '{parsed.customer_name}' - awaiting review.")
-                if self._on_new_customer:
-                    self._on_new_customer(parsed.customer_name, pid)
+                           action="queued", filename=path.name,
+                           message="No customer name could be read from this "
+                                   "invoice - add the customer manually, then "
+                                   "retry it from the Error Log.")
             return "pending_new_customer"
 
-        # Providers depend only on settings and the customer's toggles, not on
-        # the file, so build them once per email rather than per attachment -
-        # each construction otherwise costs a fresh OAuth token refresh.
-        targets = self._targets_for(customer)
-        if not targets:
-            self._emit(level="WARN", customer_name=customer["name"],
-                       invoice_ref=parsed.invoice_ref, platform="-", action="no_route",
-                       message="Customer matched but no upload toggles enabled.")
-            return "no_route"
-
         allowed = set(customer["file_types"].split(","))
+        # Resolved once per email, not per attachment: building a provider
+        # refreshes OAuth tokens.
+        targets = self._targets_for(customer)
         routed_any = False
         for path in attachments:
             ext = path.suffix.lower().lstrip(".")
@@ -133,6 +133,40 @@ class Router:
             if prov.key != "none" and prov.key not in {t.key for t in targets}:
                 targets.append(prov)
         return targets
+
+    def _auto_add_customer(self, parsed: ParseResult, sender: str):
+        """Create a customer for an unrecognised supplier and flag it as new.
+
+        Prompting for every unknown supplier does not scale, so they are added
+        silently and shown with a NEW badge in the Customers tab. Defaults
+        match the safe choice: the Service system on (that is the whole point
+        of the tool), the Accounting system OFF so nothing reaches the books
+        without a deliberate decision, and PDF only.
+        """
+        name = (parsed.customer_name or "").strip()
+        if not name:
+            return None
+        try:
+            cid = self._db.upsert_customer({
+                "name": name,
+                "aliases": [],
+                "servicem8_enabled": True,     # email -> service system: on
+                "accounting_enabled": False,   # email -> accounting: manual
+                "file_types": ["pdf"],
+                "notes": f"Added automatically from an invoice sent by {sender}.",
+                "reviewed": 0,                 # shows as NEW until checked
+            })
+        except Exception as exc:
+            log.exception("Auto-add failed for %s", name)
+            self._emit(level="ERROR", customer_name=name, action="auto_add",
+                       message=f"Could not add customer automatically: {exc}")
+            return None
+
+        self._emit(level="INFO", customer_name=name, platform="-",
+                   action="new customer",
+                   message="New supplier added automatically (Service upload ON, "
+                           "Accounting OFF, PDF only). Review it in Customers.")
+        return self._db.get_customer(cid)
 
     def _dispatch(self, customer, ctx: UploadContext, targets=None) -> bool:
         """Fire each enabled provider for a single file.

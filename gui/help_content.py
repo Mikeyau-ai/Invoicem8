@@ -385,6 +385,28 @@ SETUP_GUIDES: dict[str, str] = {
         "permissions > Microsoft Graph > Delegated > Mail.Read. Then paste the "
         "Application (client) ID into the field below."
     ),
+    "customers": (
+        "Customers - how suppliers get added\n"
+        "Unrecognised suppliers are added automatically as their first invoice "
+        "arrives; you are never interrupted mid-scan. A new supplier gets:\n"
+        "  - Service system upload: ON  (this is the point of the tool)\n"
+        "  - Accounting system upload: OFF (deliberate decision, per customer)\n"
+        "  - File types: PDF only\n"
+        "and is marked '* NEW' in yellow until you look at it.\n\n"
+        "Reviewing:\n"
+        "- Sort the list by Name, Newest/Oldest added, or 'New / unreviewed "
+        "first' (the default).\n"
+        "- 'Show new only' hides everything you have already checked.\n"
+        "- The counter under the controls shows how many are still new.\n"
+        "- Opening a customer, checking the toggles and clicking Save clears "
+        "the NEW badge. That is all 'reviewing' means.\n\n"
+        "Matching: an invoice matches on the customer name or any of its "
+        "Aliases, so add the supplier's other trading names there and future "
+        "invoices match without creating a duplicate.\n\n"
+        "If no customer name can be read at all, the invoice is held instead "
+        "of guessed - it appears in the Error Log so it can be retried once "
+        "the customer exists."
+    ),
     "email_accounts": (
         "Email accounts - monitoring more than one mailbox\n"
         "InvoiceM8 can watch up to 10 mailboxes. Settings > Email accounts > "
