@@ -3,6 +3,13 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.15
+- Graph setup guide and the Client ID help now cover the "AADSTS16000 /
+  Interaction required - your live.com account does not exist in tenant
+  Microsoft Services" wall that personal Microsoft accounts hit at
+  portal.azure.com, with the exact steps to create your own free Entra
+  directory so App registrations becomes available.
+
 ## 1.0.14
 - **Microsoft Graph sign-in rebuilt around the device-code flow.** It now
   needs only an Application (client) ID - no client secret, no tenant ID, no
