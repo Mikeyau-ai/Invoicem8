@@ -8,12 +8,15 @@ truth - it shows the code, lets you copy it, and reports the real outcome
 """
 from __future__ import annotations
 
+import logging
 import threading
 import webbrowser
 
 import customtkinter as ctk
 
 from gui.theme import C, FONT_HEAD, FONT_UI, FONT_WORDMARK, accent_button
+
+log = logging.getLogger(__name__)
 
 DEVICE_LOGIN_URL = "https://microsoft.com/devicelogin"
 
@@ -52,6 +55,8 @@ class GraphSignInDialog(ctk.CTkToplevel):
                       colour=C["btn_off"]).pack(side="left")
         accent_button(ctk, btns, "Open sign-in page", self._open,
                       colour=C["blue"]).pack(side="left", padx=8)
+        accent_button(ctk, btns, "Copy status text", self._copy_status,
+                      colour=C["btn_off"]).pack(side="left")
 
         ctk.CTkLabel(self, text="Status", font=FONT_UI,
                      text_color=C["blue"]).pack(anchor="w", padx=20, pady=(10, 2))
@@ -65,6 +70,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
         self._close_btn.pack(pady=(0, 12))
 
         self._code = ""
+        self._result = None
         self.after(100, self._start)
 
     # -- helpers -------------------------------------------------
@@ -84,6 +90,15 @@ class GraphSignInDialog(ctk.CTkToplevel):
             self.clipboard_clear()
             self.clipboard_append(self._code)
             self._say(f"Code {self._code} copied to the clipboard.", C["dim"])
+        except Exception:
+            pass
+
+    def _copy_status(self) -> None:
+        """Put the whole status message on the clipboard - no screenshot needed."""
+        try:
+            text = self._status.get("1.0", "end").strip()
+            self.clipboard_clear()
+            self.clipboard_append(text)
         except Exception:
             pass
 
@@ -108,6 +123,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
         except Exception as exc:
             self._code_lbl.configure(text="-", text_color=C["red"])
             self._steps.configure(text="Sign-in could not start.")
+            log.error("Graph sign-in could not start: %s", exc)
             self._say(str(exc), C["red"])
             return
 
@@ -127,21 +143,33 @@ class GraphSignInDialog(ctk.CTkToplevel):
         self._say("Waiting for you to complete sign-in in the browser...",
                   C["yellow"])
 
+        # The worker only records the outcome; the Tk thread picks it up by
+        # polling. Calling .after() from a worker thread is not reliably
+        # thread-safe and can be dropped, which would leave this window stuck
+        # on "Waiting..." forever.
         def work() -> None:
             try:
                 who = complete_device_login(self._settings, flow, app, cache)
-                msg, colour = (f"SUCCESS - signed in as {who}.\n\n"
-                               f"You can close this window and click "
-                               f"'Test mailbox'."), C["green"]
+                log.info("Graph sign-in succeeded for %s", who)
+                self._result = (f"SUCCESS - signed in as {who}.\n\n"
+                                f"Close this window and click 'Test mailbox'.",
+                                C["green"])
             except Exception as exc:
-                msg, colour = f"FAILED\n\n{exc}", C["red"]
-            if not self._closed:
-                try:
-                    self.after(0, lambda: self._finish(msg, colour))
-                except Exception:
-                    pass
+                log.error("Graph sign-in failed: %s", exc)
+                self._result = (f"FAILED\n\n{exc}", C["red"])
 
         threading.Thread(target=work, daemon=True, name="graph-signin").start()
+        self.after(300, self._poll_result)
+
+    def _poll_result(self) -> None:
+        """Main-thread poll for the worker's outcome."""
+        if self._closed:
+            return
+        if self._result is None:
+            self.after(300, self._poll_result)
+            return
+        msg, colour = self._result
+        self._finish(msg, colour)
 
     def _finish(self, msg: str, colour: str) -> None:
         if self._closed:

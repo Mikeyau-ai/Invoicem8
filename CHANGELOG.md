@@ -3,6 +3,15 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.22
+- Sign-in window gains a "Copy status text" button, and every sign-in outcome
+  is written to %LOCALAPPDATA%\InvoiceM8\logs\invoicem8.log - so the exact
+  Microsoft error can be reported without taking a screenshot.
+- Fixed the sign-in result being dropped: the outcome was pushed to the UI
+  from the worker thread, which is not reliably thread-safe and could leave
+  the window stuck on "Waiting..." even after Microsoft had answered. The Tk
+  thread now polls for the result instead.
+
 ## 1.0.21
 - Microsoft sign-in now opens its own window instead of reporting through the
   Settings status box: the code is shown in large text with Copy and Open
