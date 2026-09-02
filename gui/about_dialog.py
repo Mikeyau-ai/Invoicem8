@@ -13,6 +13,7 @@ import customtkinter as ctk
 
 from core import updater
 from gui.theme import C, FONT_DATA, FONT_TAGLINE, FONT_UI, FONT_WORDMARK, accent_button
+from gui.theme import apply_icon
 from version import APP_VERSION
 
 REPO_URL = "https://github.com/Mikeyau-ai/Invoicem8"
@@ -39,6 +40,7 @@ class AboutWindow(ctk.CTkToplevel):
     def __init__(self, master) -> None:
         """Build the about window and load the bundled changelog."""
         super().__init__(master)
+        apply_icon(self)
         self.title("About InvoiceM8")
         self.geometry("560x620")
         self.configure(fg_color=C["bg"])

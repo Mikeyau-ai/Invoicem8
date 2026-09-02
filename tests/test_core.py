@@ -87,13 +87,13 @@ class TempDbCase(unittest.TestCase):
         return path
 
     def route(self, parsed: ParseResult, path: pathlib.Path,
-              sender: str = "accounts@acme.com.au") -> str:
+              sender: str = "accounts@acme.com.au", job_floor: int = 0) -> str:
         """Run the router with the service provider faked out."""
         self.events.clear()
         r = router_mod.Router(self.db, self.settings, emit=self.emit)
         with patch.object(router_mod, "build_service_provider",
                           lambda s: FakeService(s)):
-            return r.route(parsed, [path], "subject", sender)
+            return r.route(parsed, [path], "subject", sender, job_floor=job_floor)
 
 
 class TestClassification(unittest.TestCase):
@@ -314,6 +314,50 @@ class TestRoutingGates(TempDbCase):
         result = self.route(ParseResult(customer_name="Known Co",
                                         job_number="10160", confidence=0.01,
                                         job_candidates=["10160"]),
+                            self.make_pdf())
+        self.assertEqual(result, "routed")
+        self.assertIn("uploaded", self.actions())
+
+    def test_catch_up_floor_blocks_old_jobs(self) -> None:
+        """A catch-up floor leaves a job below it silently unfiled."""
+        self.db.upsert_customer({"name": "Known Co", "servicem8_enabled": True,
+                                 "file_types": ["pdf"]})
+        result = self.route(ParseResult(customer_name="Known Co",
+                                        job_number="9500", confidence=0.9,
+                                        job_candidates=["9500"]),
+                            self.make_pdf(), job_floor=10000)
+        self.assertEqual(result, "no_route")
+        self.assertNotIn("uploaded", self.actions())
+
+    def test_catch_up_floor_allows_new_jobs(self) -> None:
+        """A job at or above the floor is filed as normal."""
+        self.db.upsert_customer({"name": "Known Co", "servicem8_enabled": True,
+                                 "file_types": ["pdf"]})
+        result = self.route(ParseResult(customer_name="Known Co",
+                                        job_number="10160", confidence=0.9,
+                                        job_candidates=["10160"]),
+                            self.make_pdf(), job_floor=10000)
+        self.assertEqual(result, "routed")
+        self.assertIn("uploaded", self.actions())
+
+    def test_catch_up_floor_blocks_unreadable_job(self) -> None:
+        """Under a floor, an invoice with no readable job number is skipped too."""
+        self.db.upsert_customer({"name": "Known Co", "servicem8_enabled": True,
+                                 "file_types": ["pdf"]})
+        result = self.route(ParseResult(customer_name="Known Co",
+                                        job_number="", confidence=0.9,
+                                        job_candidates=["7"]),
+                            self.make_pdf(), job_floor=10000)
+        self.assertEqual(result, "no_route")
+        self.assertNotIn("uploaded", self.actions())
+
+    def test_no_floor_files_every_job(self) -> None:
+        """With no floor (the default), even a low job number is filed."""
+        self.db.upsert_customer({"name": "Known Co", "servicem8_enabled": True,
+                                 "file_types": ["pdf"]})
+        result = self.route(ParseResult(customer_name="Known Co",
+                                        job_number="12", confidence=0.9,
+                                        job_candidates=["12"]),
                             self.make_pdf())
         self.assertEqual(result, "routed")
         self.assertIn("uploaded", self.actions())

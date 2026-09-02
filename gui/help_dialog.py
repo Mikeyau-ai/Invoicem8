@@ -9,6 +9,7 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from gui.theme import C, FONT_HEAD, FONT_UI, accent_button
+from gui.theme import apply_icon
 
 
 class HelpPopup(ctk.CTkToplevel):
@@ -17,6 +18,7 @@ class HelpPopup(ctk.CTkToplevel):
     def __init__(self, master, title: str, text: str) -> None:
         """Build the bubble and position it at the mouse pointer."""
         super().__init__(master)
+        apply_icon(self)
         self.overrideredirect(True)                     # no title bar
         self.configure(fg_color=C["border"])
         self.attributes("-topmost", True)
@@ -56,6 +58,7 @@ class GuideWindow(ctk.CTkToplevel):
     def __init__(self, master, sections: list[tuple[str, str]]) -> None:
         """Render one scrollable card per guide section."""
         super().__init__(master)
+        apply_icon(self)
         self.title("InvoiceM8 - Setup guide")
         self.geometry("640x680")
         self.configure(fg_color=C["bg"])

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dateutil import parser as dtparse
 
@@ -43,6 +43,13 @@ class Watcher:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._wake = threading.Event()
+        # A catch-up sweep runs on its own thread; this serialises it against
+        # the polling thread so two fetches never hit the same mailbox at once
+        # (unsafe for the Outlook COM backend in particular). Its own cancel
+        # flag lets a stop abort it without being tangled up in ``_stop``,
+        # which also means "the watcher is not running".
+        self._scan_lock = threading.Lock()
+        self._catch_up_stop = threading.Event()
 
     # -- lifecycle ---------------------------------------------------
     @property
@@ -69,6 +76,7 @@ class Watcher:
         """
         already_stopping = self._stop.is_set()
         self._stop.set()
+        self._catch_up_stop.set()   # abort an in-flight catch-up sweep too
         self._wake.set()
         if self._thread and self._thread.is_alive() and not already_stopping:
             self._thread.join(timeout=5)
@@ -78,6 +86,40 @@ class Watcher:
     def scan_now(self) -> None:
         """Force an immediate poll (used by the 'Scan now' button)."""
         self._wake.set()
+
+    def catch_up(self, days_back: int, job_floor: int, on_done=None) -> None:
+        """Run one deliberate sweep of old mail, off-thread, with a job floor.
+
+        This is the "clear a backlog of old unread invoices" action. Unlike a
+        routine poll it looks back an arbitrary number of days and, when
+        ``job_floor`` > 0, refuses to file an invoice against a Service-system
+        job numbered below it (an unreadable job number is skipped too). The
+        floor is not persisted - it guards this run only. Runs whether or not
+        the polling thread is started; ``on_done`` fires on completion.
+        """
+        since = datetime.now(timezone.utc) - timedelta(days=max(1, days_back))
+        self._catch_up_stop.clear()
+
+        def work() -> None:
+            """Thread body: one locked poll with the supplied floor."""
+            try:
+                self._emit(level="INFO", action="catch_up",
+                           message=f"Catch-up scan: mail from the last "
+                                   f"{days_back} day(s), skipping jobs below "
+                                   f"{job_floor or 'none'}.")
+                with self._scan_lock:
+                    self._poll(since=since, unread_only=False,
+                               job_floor=job_floor, cancel=self._catch_up_stop)
+                self._emit(level="INFO", action="catch_up",
+                           message="Catch-up scan finished.")
+            except Exception as exc:
+                log.exception("Catch-up scan failed")
+                self._emit(level="ERROR", action="catch_up", message=str(exc))
+            finally:
+                if on_done:
+                    on_done()
+
+        threading.Thread(target=work, name="InvoiceM8-CatchUp", daemon=True).start()
 
     # -- main loop -------------------------------------------------
     def _run(self) -> None:
@@ -100,7 +142,9 @@ class Watcher:
             if self._stop.is_set():
                 break
             try:
-                self._poll(since=self._resume_point(), unread_only=self._settings.get_bool("watcher.unread_only"))
+                with self._scan_lock:   # never overlap a catch-up sweep
+                    self._poll(since=self._resume_point(),
+                               unread_only=self._settings.get_bool("watcher.unread_only"))
             except Exception as exc:
                 log.exception("Poll failed")
                 self._emit(level="ERROR", action="poll", message=str(exc))
@@ -119,7 +163,8 @@ class Watcher:
         """Startup sweep: unread + anything since we last ran."""
         self._emit(level="INFO", action="back_check",
                    message="Startup back-check for missed invoices...")
-        self._poll(since=self._resume_point(), unread_only=False, back_check=True)
+        with self._scan_lock:   # never overlap a catch-up sweep
+            self._poll(since=self._resume_point(), unread_only=False, back_check=True)
 
     def _housekeeping(self) -> None:
         """Bounded-growth maintenance: prune the attachment cache and the log.
@@ -138,8 +183,15 @@ class Watcher:
                        message=f"Housekeeping: removed {removed} cached attachment "
                                f"folder(s), trimmed {trimmed} old log row(s).")
 
-    def _poll(self, since, unread_only: bool, back_check: bool = False) -> None:
-        """One scan -> parse -> route cycle across every enabled mailbox."""
+    def _poll(self, since, unread_only: bool, back_check: bool = False,
+              job_floor: int = 0, cancel: threading.Event | None = None) -> None:
+        """One scan -> parse -> route cycle across every enabled mailbox.
+
+        ``job_floor`` is forwarded to the router (0 = off; only a catch-up
+        sweep sets it). ``cancel`` is the flag to abort on - the shared
+        ``_stop`` for a routine poll, the catch-up's own flag for a sweep.
+        """
+        cancel = cancel or self._stop
         # Prefilter on the mailbox side so attachments no customer wants are
         # never transferred; per-customer filtering still happens in the router.
         allowed_ext = self._db.all_file_types()
@@ -150,7 +202,7 @@ class Watcher:
         for row, backend in account_backends(self._settings, self._db):
             label = (row["address"] if row and row["address"]
                      else "the configured mailbox")
-            if self._stop.is_set():
+            if cancel.is_set():
                 return
             try:
                 found = backend.fetch(since=since, unread_only=unread_only,
@@ -171,7 +223,7 @@ class Watcher:
             return
 
         for msg in sorted(messages, key=lambda m: m.received_at):
-            if self._stop.is_set():
+            if cancel.is_set():
                 return
             if self._db.is_email_processed(msg.message_id):
                 continue
@@ -185,7 +237,8 @@ class Watcher:
                            message=f"job={parsed.job_number or '-'} "
                                    f"ref={parsed.invoice_ref or '-'} "
                                    f"conf={parsed.confidence:.2f} src={parsed.source}")
-                result = self._router.route(parsed, msg.attachments, msg.subject, msg.sender)
+                result = self._router.route(parsed, msg.attachments, msg.subject,
+                                            msg.sender, job_floor=job_floor)
             except Exception as exc:
                 log.exception("Message processing failed")
                 self._db.add_error(stage="parse", filename=msg.subject,

@@ -15,6 +15,7 @@ import webbrowser
 import customtkinter as ctk
 
 from gui.theme import C, FONT_HEAD, FONT_UI, FONT_WORDMARK, accent_button
+from gui.theme import apply_icon
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class GraphSignInDialog(ctk.CTkToplevel):
     def __init__(self, master, settings, on_done=None) -> None:
         """Build the window and immediately request a device code."""
         super().__init__(master)
+        apply_icon(self)
         self._settings = settings
         self._on_done = on_done
         self._closed = False

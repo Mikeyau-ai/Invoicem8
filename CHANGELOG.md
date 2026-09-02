@@ -3,6 +3,20 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.38
+- The app icon is now blue, and it is finally used *everywhere*. Dialogs were
+  showing CustomTkinter's own blue logo, not ours: `apply_icon()` was only
+  called on the main window, and `CTkToplevel` stamps the library's icon on
+  itself shortly after construction. Every window now applies the InvoiceM8
+  icon, twice, so ours is the one that survives.
+- New "Catch up…" button in the header: a one-off sweep of invoice mail
+  already in the mailbox, for use after the app has been off or on a new
+  mailbox. It asks how far back to look and, optionally, a job number to
+  stop at - an invoice for a Service-system job below that number, or one
+  whose job number can't be read, is skipped rather than filed against a
+  job that is probably closed. The job floor is not saved; it guards that
+  one run. Routine polling is unchanged.
+
 ## 1.0.37
 - Added a test suite (`run_tests.bat`, or `python -m unittest discover -s
   tests`). 28 tests, standard library only, no dependency to install. It

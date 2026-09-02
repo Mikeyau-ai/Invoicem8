@@ -1,9 +1,10 @@
-"""Modal dialogs - currently the 'new customer detected' prompt."""
+"""Modal dialogs - the 'new customer detected' prompt and the catch-up sweep."""
 from __future__ import annotations
 
 import customtkinter as ctk
 
 from gui.theme import C, FONT_HEAD, FONT_UI, accent_button
+from gui.theme import apply_icon
 
 
 class NewCustomerDialog(ctk.CTkToplevel):
@@ -18,6 +19,7 @@ class NewCustomerDialog(ctk.CTkToplevel):
                  accounting_label: str) -> None:
         """Build the prompt, pre-filled with the extracted customer name."""
         super().__init__(master)
+        apply_icon(self)
         self.title("New customer detected")
         self.configure(fg_color=C["bg"])
         # Sized to the content, capped to the screen, and resizable - the
@@ -95,5 +97,81 @@ class NewCustomerDialog(ctk.CTkToplevel):
 
     def _reject(self) -> None:
         """Dismiss without adding a customer."""
+        self.result = None
+        self.destroy()
+
+
+class CatchUpDialog(ctk.CTkToplevel):
+    """Configure a one-off catch-up sweep of old, unprocessed invoice mail.
+
+    Publishes ``self.result`` as ``{"days_back": int, "job_floor": int}``, or
+    ``None`` if cancelled. The job floor is deliberately NOT a saved setting -
+    it guards this single run so a backlog sweep does not file invoices
+    against jobs that are already closed.
+    """
+
+    def __init__(self, master) -> None:
+        """Build the two-field prompt with its explanatory note."""
+        super().__init__(master)
+        apply_icon(self)
+        self.title("Catch up on old mail")
+        self.configure(fg_color=C["bg"])
+        self.geometry("520x360")
+        self.minsize(460, 320)
+        self.grab_set()
+        self.result: dict | None = None
+
+        btns = ctk.CTkFrame(self, fg_color=C["bg"])
+        btns.pack(side="bottom", fill="x", padx=20, pady=(8, 16))
+
+        ctk.CTkLabel(self, text="Catch up on old mail", font=FONT_HEAD,
+                     text_color=C["yellow"]).pack(anchor="w", padx=20, pady=(18, 2))
+        ctk.CTkLabel(self, text="One-off scan of invoice emails already in the mailbox.\n"
+                                "Use it after the app has been off, or on a new mailbox.",
+                     font=FONT_UI, text_color=C["dim"], justify="left").pack(anchor="w", padx=20)
+
+        form = ctk.CTkFrame(self, fg_color=C["panel"])
+        form.pack(fill="both", expand=True, padx=20, pady=16)
+
+        ctk.CTkLabel(form, text="Scan mail from the last (days)", font=FONT_UI,
+                     text_color=C["text"]).grid(row=0, column=0, sticky="w", padx=12, pady=(14, 2))
+        self._days = ctk.CTkEntry(form, width=90)
+        self._days.insert(0, "90")
+        self._days.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 12))
+
+        ctk.CTkLabel(form, text="Skip jobs numbered below (blank = file all)", font=FONT_UI,
+                     text_color=C["text"]).grid(row=2, column=0, sticky="w", padx=12, pady=(0, 2))
+        self._floor = ctk.CTkEntry(form, width=90, placeholder_text="e.g. 15000")
+        self._floor.grid(row=3, column=0, sticky="w", padx=12, pady=(0, 12))
+
+        ctk.CTkLabel(form, text="An invoice for a job below that number - or one whose job\n"
+                                "number can't be read - is skipped, not filed anywhere.",
+                     font=FONT_UI, text_color=C["dim"], justify="left").grid(
+                         row=4, column=0, sticky="w", padx=12, pady=(0, 10))
+
+        accent_button(ctk, btns, "Run catch-up", self._accept,
+                      colour=C["green"]).pack(side="right", padx=(8, 0))
+        accent_button(ctk, btns, "Cancel", self._reject,
+                      colour=C["btn_off"]).pack(side="right")
+        self.protocol("WM_DELETE_WINDOW", self._reject)
+
+    def _accept(self) -> None:
+        """Validate both fields and publish the result, then close."""
+        try:
+            days = int(self._days.get().strip() or "90")
+        except ValueError:
+            self._days.configure(border_color=C["red"])
+            return
+        raw_floor = self._floor.get().strip()
+        try:
+            floor = int(raw_floor) if raw_floor else 0
+        except ValueError:
+            self._floor.configure(border_color=C["red"])
+            return
+        self.result = {"days_back": max(1, days), "job_floor": max(0, floor)}
+        self.destroy()
+
+    def _reject(self) -> None:
+        """Dismiss without running a sweep."""
         self.result = None
         self.destroy()

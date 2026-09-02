@@ -15,11 +15,14 @@ from PIL import Image, ImageDraw
 
 OUT = Path(__file__).resolve().parent / "assets" / "icon.ico"
 
-# Matches gui.theme.C - the family palette these tools share.
-BG = (26, 26, 26)          # panel  #1a1a1a
-PAGE = (220, 220, 220)     # text   #dcdcdc
+# Matches gui.theme.C - the family palette these tools share. The tile is the
+# palette blue: at 16px the tile colour is most of what the eye gets, so the
+# icon has to be recognisable by colour alone in a crowded taskbar.
+BG = (82, 150, 224)        # blue   #5296e0
+EDGE = (44, 92, 145)       # darker blue, for outlines against the tile
+PAGE = (245, 247, 250)     # near-white page
 ACCENT = (76, 175, 80)     # green  #4caf50
-LINE = (107, 107, 107)     # dim    #6b6b6b
+LINE = (150, 165, 185)     # muted blue-grey rule
 
 #: Windows picks the nearest size; 16 and 32 are what the taskbar actually uses.
 SIZES = [16, 24, 32, 48, 64, 128, 256]
@@ -39,7 +42,7 @@ def _draw(size: int = 1024) -> Image.Image:
     fold = int(150 * u)
     d.rounded_rectangle([left, top, right, bottom], radius=int(40 * u), fill=PAGE)
     d.polygon([(right - fold, top), (right, top + fold), (right - fold, top + fold)],
-              fill=BG)
+              fill=EDGE)
 
     # Text lines on the page - the top one accented so it reads as a document
     # even at 16px, where finer detail disappears.
@@ -52,11 +55,11 @@ def _draw(size: int = 1024) -> Image.Image:
 
     # Green tick badge, bottom-right: "processed".
     cx, cy, r = int(735 * u), int(760 * u), int(190 * u)
-    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=ACCENT, outline=BG,
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=ACCENT, outline=PAGE,
               width=int(34 * u))
     d.line([(cx - int(85 * u), cy), (cx - int(20 * u), cy + int(65 * u)),
             (cx + int(95 * u), cy - int(70 * u))],
-           fill=BG, width=int(60 * u), joint="curve")
+           fill=PAGE, width=int(60 * u), joint="curve")
     return img
 
 

@@ -147,11 +147,27 @@ def apply_icon(window) -> None:
     Same .ico PyInstaller stamps into the executable, so the taskbar icon and
     the file icon always match. Silently ignored if the asset is missing or the
     platform has no .ico support.
+
+    Every window needs this call, including dialogs: CTkToplevel stamps
+    CustomTkinter's own logo on itself shortly after construction, so a
+    Toplevel that never calls this shows the library's blue tile instead of
+    ours. We set the icon twice - once now, once after CustomTkinter's own
+    deferred call has run - so ours is the one that survives.
     """
     from config import ICON_PATH
 
-    try:
-        if ICON_PATH.exists():
+    if not ICON_PATH.exists():
+        return
+
+    def _set() -> None:
+        """Stamp the .ico onto the window, ignoring platform refusals."""
+        try:
             window.iconbitmap(default=str(ICON_PATH))
+        except Exception:
+            pass
+
+    _set()
+    try:
+        window.after(300, _set)
     except Exception:
         pass

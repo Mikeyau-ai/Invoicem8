@@ -16,7 +16,7 @@ from core.settings_store import Settings
 from core.watcher import Watcher
 from gui import theme
 from gui.customers_tab import CustomersTab
-from gui.dialogs import NewCustomerDialog
+from gui.dialogs import CatchUpDialog, NewCustomerDialog
 from gui.errors_tab import ErrorsTab
 from gui.logs_tab import LogsTab
 from gui.settings_tab import SettingsTab
@@ -99,7 +99,8 @@ class App(ctk.CTk):
         self._tagline.bind("<Button-1>", lambda _e: self.open_about())
         self._refresh_tagline()
 
-        # Right-aligned controls (packed right-to-left): Scan now | Start/Stop | Settings
+        # Right-aligned controls (packed right-to-left):
+        #   Catch up | Scan now | Start/Stop | Settings
         accent_button(ctk, bar, "Settings", self._open_settings,
                       colour=C["btn_off"]).pack(side="right", padx=(4, 12))
         self._start_btn = accent_button(ctk, bar, "Start Watcher", self._toggle_watcher,
@@ -107,6 +108,8 @@ class App(ctk.CTk):
         self._start_btn.pack(side="right", padx=4)
         accent_button(ctk, bar, "Scan now", self._scan_now,
                       colour=C["blue"]).pack(side="right", padx=4)
+        accent_button(ctk, bar, "Catch up…", self._catch_up,
+                      colour=C["btn_off"]).pack(side="right", padx=4)
 
     # -- tabs ---------------------------------------------------
     def _build_tabs(self) -> None:
@@ -275,6 +278,19 @@ class App(ctk.CTk):
         if not self.watcher.running:
             self.watcher.start()
         self.watcher.scan_now()
+
+    def _catch_up(self) -> None:
+        """Catch-up button: prompt for a lookback + job floor, then sweep once.
+
+        Independent of the watcher's on/off state - the sweep runs on its own
+        thread. The job floor is not saved; it guards this one run.
+        """
+        dlg = CatchUpDialog(self)
+        self.wait_window(dlg)
+        if not dlg.result:
+            return
+        self.watcher.catch_up(dlg.result["days_back"], dlg.result["job_floor"],
+                              on_done=lambda: self.after(0, self.refresh_logs))
 
     def _set_status(self, running: bool) -> None:
         """Reflect watcher state in the toggle button and the glow border."""
