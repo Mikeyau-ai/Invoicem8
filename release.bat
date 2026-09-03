@@ -11,19 +11,12 @@ echo     #   #  ## #   # #   #   #   #    #    #   # #   #
 echo   ##### #   #   #    ###  ##### #### ##### #   #  ###
 echo   release script   github.com/Mikeyau-ai/Invoicem8
 echo.
-echo  Building + publishing InvoiceM8 release...
-echo.
 
-if exist build rmdir /s /q build
-if exist dist  rmdir /s /q dist
-
-python -m pip install -q --upgrade pyinstaller
-python -m PyInstaller --noconfirm --clean InvoiceM8.spec
-if errorlevel 1 (
-  echo  BUILD FAILED - not releasing.
-  pause
-  exit /b 1
-)
-
+:: Thin wrapper: release.py is the one system - tests, PyInstaller build, then
+:: (after a Y/N confirmation) publishes GitHub release v<APP_VERSION> with the
+:: CHANGELOG notes. Pass --skip-build to publish the exe already in dist\,
+:: or --yes to skip the confirmation.
 python release.py %*
+set RC=%errorlevel%
 pause
+exit /b %RC%
