@@ -280,16 +280,17 @@ class App(ctk.CTk):
         self.watcher.scan_now()
 
     def _catch_up(self) -> None:
-        """Catch-up button: prompt for a lookback + job floor, then sweep once.
+        """Catch-up button: prompt for a lookback + job range, then sweep once.
 
         Independent of the watcher's on/off state - the sweep runs on its own
-        thread. The job floor is not saved; it guards this one run.
+        thread. The job range is not saved; it guards this one run.
         """
         dlg = CatchUpDialog(self)
         self.wait_window(dlg)
         if not dlg.result:
             return
         self.watcher.catch_up(dlg.result["days_back"], dlg.result["job_floor"],
+                              dlg.result["job_ceiling"],
                               on_done=lambda: self.after(0, self.refresh_logs))
 
     def _set_status(self, running: bool) -> None:

@@ -104,10 +104,11 @@ class NewCustomerDialog(ctk.CTkToplevel):
 class CatchUpDialog(ctk.CTkToplevel):
     """Configure a one-off catch-up sweep of old, unprocessed invoice mail.
 
-    Publishes ``self.result`` as ``{"days_back": int, "job_floor": int}``, or
-    ``None`` if cancelled. The job floor is deliberately NOT a saved setting -
-    it guards this single run so a backlog sweep does not file invoices
-    against jobs that are already closed.
+    Publishes ``self.result`` as
+    ``{"days_back": int, "job_floor": int, "job_ceiling": int}``, or ``None``
+    if cancelled. The job bounds are deliberately NOT saved settings - they
+    guard this single run so a backlog sweep only touches the jobs intended
+    (e.g. skip jobs already closed, or file just one job / a small range).
     """
 
     def __init__(self, master) -> None:
@@ -116,8 +117,8 @@ class CatchUpDialog(ctk.CTkToplevel):
         apply_icon(self)
         self.title("Catch up on old mail")
         self.configure(fg_color=C["bg"])
-        self.geometry("520x360")
-        self.minsize(460, 320)
+        self.geometry("520x380")
+        self.minsize(460, 340)
         self.grab_set()
         self.result: dict | None = None
 
@@ -139,13 +140,14 @@ class CatchUpDialog(ctk.CTkToplevel):
         self._days.insert(0, "90")
         self._days.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 12))
 
-        ctk.CTkLabel(form, text="Skip jobs numbered below (blank = file all)", font=FONT_UI,
+        ctk.CTkLabel(form, text="Only file jobs in this range (blank = file all)", font=FONT_UI,
                      text_color=C["text"]).grid(row=2, column=0, sticky="w", padx=12, pady=(0, 2))
-        self._floor = ctk.CTkEntry(form, width=90, placeholder_text="e.g. 15000")
-        self._floor.grid(row=3, column=0, sticky="w", padx=12, pady=(0, 12))
+        self._jobs = ctk.CTkEntry(form, width=170, placeholder_text="e.g. 15000  or  15000-15010")
+        self._jobs.grid(row=3, column=0, sticky="w", padx=12, pady=(0, 12))
 
-        ctk.CTkLabel(form, text="An invoice for a job below that number - or one whose job\n"
-                                "number can't be read - is skipped, not filed anywhere.",
+        ctk.CTkLabel(form, text="A bare number is a floor (skip anything below it); low-high is\n"
+                                "a range. An invoice outside it - or one whose job number\n"
+                                "can't be read - is skipped, not filed anywhere.",
                      font=FONT_UI, text_color=C["dim"], justify="left").grid(
                          row=4, column=0, sticky="w", padx=12, pady=(0, 10))
 
@@ -156,19 +158,34 @@ class CatchUpDialog(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self._reject)
 
     def _accept(self) -> None:
-        """Validate both fields and publish the result, then close."""
+        """Validate the days field, parse the job range, then close.
+
+        Accepts ``""`` (all jobs), ``N`` / ``N-`` (floor only), ``-M`` (ceiling
+        only) or ``N-M`` (inclusive range, ends swapped if reversed).
+        """
         try:
             days = int(self._days.get().strip() or "90")
         except ValueError:
             self._days.configure(border_color=C["red"])
             return
-        raw_floor = self._floor.get().strip()
-        try:
-            floor = int(raw_floor) if raw_floor else 0
-        except ValueError:
-            self._floor.configure(border_color=C["red"])
-            return
-        self.result = {"days_back": max(1, days), "job_floor": max(0, floor)}
+
+        raw = self._jobs.get().strip().replace(" ", "")
+        floor = ceiling = 0
+        if raw:
+            lo, sep, hi = raw.partition("-")
+            try:
+                floor = int(lo) if lo else 0
+                ceiling = int(hi) if hi else 0
+                if not sep:                     # bare "N" -> floor only
+                    ceiling = 0
+            except ValueError:
+                self._jobs.configure(border_color=C["red"])
+                return
+            if floor and ceiling and floor > ceiling:
+                floor, ceiling = ceiling, floor
+
+        self.result = {"days_back": max(1, days),
+                       "job_floor": max(0, floor), "job_ceiling": max(0, ceiling)}
         self.destroy()
 
     def _reject(self) -> None:

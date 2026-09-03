@@ -78,13 +78,15 @@ class Router:
         return digest.hexdigest()
 
     def route(self, parsed: ParseResult, attachments: list[Path],
-              subject: str, sender: str, job_floor: int = 0) -> str:
+              subject: str, sender: str, job_floor: int = 0,
+              job_ceiling: int = 0) -> str:
         """Process every attachment for one email. Returns a short result tag.
 
-        ``job_floor`` is the one-off "catch-up" guard (0 = off): while set, an
-        invoice is never filed against a Service-system job numbered below it.
-        It is passed in per call, never stored - only the deliberate catch-up
-        sweep supplies it; routine polls and Error-Log retries pass 0.
+        ``job_floor``/``job_ceiling`` are the catch-up sweep guards (0 = off):
+        while either is set, an invoice is only filed against a Service-system
+        job whose number is within [floor, ceiling]. They are passed in per
+        call, never stored - only a deliberate catch-up sweep supplies them;
+        routine polls and Error-Log retries pass 0.
         """
         from core.parser_ai import NON_INVOICE_KINDS
 
@@ -161,7 +163,8 @@ class Router:
                            message=f"File type .{ext} not enabled for this customer.")
                 continue
             ctx = self._ctx(customer, parsed, path, subject)
-            routed_any |= self._dispatch(customer, ctx, targets, job_floor=job_floor)
+            routed_any |= self._dispatch(customer, ctx, targets,
+                                         job_floor=job_floor, job_ceiling=job_ceiling)
         return "routed" if routed_any else "no_route"
 
     def _targets_for(self, customer) -> list:
@@ -232,12 +235,13 @@ class Router:
         return self._db.get_customer(cid)
 
     def _dispatch(self, customer, ctx: UploadContext, targets=None,
-                  job_floor: int = 0) -> bool:
+                  job_floor: int = 0, job_ceiling: int = 0) -> bool:
         """Fire each enabled provider for a single file.
 
         ``targets`` is the pre-resolved provider list from :meth:`_targets_for`;
         it is only rebuilt here when a caller (the error-tab retry) has none.
-        ``job_floor`` is the catch-up guard - see :meth:`route`.
+        ``job_floor``/``job_ceiling`` are the one-off sweep guards - see
+        :meth:`route`.
         """
         if targets is None:
             targets = self._targets_for(customer)
@@ -256,13 +260,16 @@ class Router:
             if provider.category == "service" and not ctx.job_number:
                 if not self._resolve_job(ctx, provider):
                     continue
-            # Catch-up guard: during a deliberate backlog sweep, filing an
-            # invoice against a long-closed job is worse than not filing it.
-            # When a floor is supplied, skip any service job below it (and any
-            # invoice whose job number could not be read).
-            if provider.category == "service" and self._below_job_floor(ctx.job_number, job_floor):
-                log.debug("Job %r below the catch-up floor %s - not filed to %s",
-                          ctx.job_number, job_floor, provider.label)
+            # Catch-up sweep guard: during a deliberate backlog sweep the
+            # caller can restrict which Service-system jobs are filed - a lower
+            # bound, an upper bound, or both. Filing against a job outside that
+            # window (or one whose number could not be read) is worse than not
+            # filing it, so skip it.
+            if provider.category == "service" and self._outside_job_range(
+                    ctx.job_number, job_floor, job_ceiling):
+                log.debug("Job %r outside the sweep range [%s, %s] - not filed to %s",
+                          ctx.job_number, job_floor or "-", job_ceiling or "-",
+                          provider.label)
                 continue
             if not provider.configured():
                 self._record_error("config", ctx, provider.label,
@@ -307,17 +314,21 @@ class Router:
         return ok_any
 
     @staticmethod
-    def _below_job_floor(job_number: str, floor: int) -> bool:
-        """True when a catch-up floor is set and this job falls below it.
+    def _outside_job_range(job_number: str, floor: int, ceiling: int) -> bool:
+        """True when a one-off sweep bound is set and this job falls outside it.
 
-        ``floor`` of 0 (or less) disables the check. A missing or non-numeric
-        job number counts as below the floor, so nothing is filed while the
-        check cannot be applied.
+        ``floor`` and ``ceiling`` of 0 (or less) each disable that end of the
+        check; with neither set the result is always False. A missing or
+        non-numeric job number counts as outside any active range, so nothing
+        is filed while the check cannot be applied.
         """
-        if floor <= 0:
+        if floor <= 0 and ceiling <= 0:
             return False
         digits = "".join(ch for ch in (job_number or "") if ch.isdigit())
-        return not digits or int(digits) < floor
+        if not digits:
+            return True
+        n = int(digits)
+        return (floor > 0 and n < floor) or (ceiling > 0 and n > ceiling)
 
     def _resolve_job(self, ctx: UploadContext, provider) -> bool:
         """Fill in a missing job number, or record why it could not be.

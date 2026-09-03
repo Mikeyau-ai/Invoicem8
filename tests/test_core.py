@@ -87,13 +87,15 @@ class TempDbCase(unittest.TestCase):
         return path
 
     def route(self, parsed: ParseResult, path: pathlib.Path,
-              sender: str = "accounts@acme.com.au", job_floor: int = 0) -> str:
+              sender: str = "accounts@acme.com.au", job_floor: int = 0,
+              job_ceiling: int = 0) -> str:
         """Run the router with the service provider faked out."""
         self.events.clear()
         r = router_mod.Router(self.db, self.settings, emit=self.emit)
         with patch.object(router_mod, "build_service_provider",
                           lambda s: FakeService(s)):
-            return r.route(parsed, [path], "subject", sender, job_floor=job_floor)
+            return r.route(parsed, [path], "subject", sender,
+                           job_floor=job_floor, job_ceiling=job_ceiling)
 
 
 class TestClassification(unittest.TestCase):
@@ -361,6 +363,43 @@ class TestRoutingGates(TempDbCase):
                             self.make_pdf())
         self.assertEqual(result, "routed")
         self.assertIn("uploaded", self.actions())
+
+    def test_catch_up_range_files_only_jobs_inside(self) -> None:
+        """A catch-up range files a job within [floor, ceiling]..."""
+        self.db.upsert_customer({"name": "Known Co", "servicem8_enabled": True,
+                                 "file_types": ["pdf"]})
+        result = self.route(ParseResult(customer_name="Known Co",
+                                        job_number="15005", confidence=0.9,
+                                        job_candidates=["15005"]),
+                            self.make_pdf(), job_floor=15000, job_ceiling=15010)
+        self.assertEqual(result, "routed")
+        self.assertIn("uploaded", self.actions())
+
+    def test_catch_up_range_skips_jobs_above_the_ceiling(self) -> None:
+        """...and leaves a job past the ceiling silently unfiled."""
+        self.db.upsert_customer({"name": "Known Co", "servicem8_enabled": True,
+                                 "file_types": ["pdf"]})
+        result = self.route(ParseResult(customer_name="Known Co",
+                                        job_number="15050", confidence=0.9,
+                                        job_candidates=["15050"]),
+                            self.make_pdf(), job_floor=15000, job_ceiling=15010)
+        self.assertEqual(result, "no_route")
+        self.assertNotIn("uploaded", self.actions())
+
+    def test_catch_up_range_can_target_a_single_job(self) -> None:
+        """Floor == ceiling: only that one job number is filed."""
+        self.db.upsert_customer({"name": "Known Co", "servicem8_enabled": True,
+                                 "file_types": ["pdf"]})
+        inside = self.route(ParseResult(customer_name="Known Co",
+                                        job_number="15001", confidence=0.9,
+                                        job_candidates=["15001"]),
+                            self.make_pdf("a.pdf"), job_floor=15001, job_ceiling=15001)
+        self.assertEqual(inside, "routed")
+        outside = self.route(ParseResult(customer_name="Known Co",
+                                         job_number="15002", confidence=0.9,
+                                         job_candidates=["15002"]),
+                             self.make_pdf("b.pdf"), job_floor=15001, job_ceiling=15001)
+        self.assertEqual(outside, "no_route")
 
     def test_credit_without_job_is_linked(self) -> None:
         """A credit is filed against the job of the invoice it quotes."""

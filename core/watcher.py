@@ -87,29 +87,38 @@ class Watcher:
         """Force an immediate poll (used by the 'Scan now' button)."""
         self._wake.set()
 
-    def catch_up(self, days_back: int, job_floor: int, on_done=None) -> None:
-        """Run one deliberate sweep of old mail, off-thread, with a job floor.
+    def catch_up(self, days_back: int, job_floor: int, job_ceiling: int = 0,
+                 on_done=None) -> None:
+        """Run one deliberate sweep of old mail, off-thread, with a job filter.
 
         This is the "clear a backlog of old unread invoices" action. Unlike a
         routine poll it looks back an arbitrary number of days and, when
-        ``job_floor`` > 0, refuses to file an invoice against a Service-system
-        job numbered below it (an unreadable job number is skipped too). The
-        floor is not persisted - it guards this run only. Runs whether or not
-        the polling thread is started; ``on_done`` fires on completion.
+        ``job_floor``/``job_ceiling`` are set, only files an invoice whose
+        Service-system job number is within [floor, ceiling] (an unreadable
+        job number is skipped too). The bounds are not persisted - they guard
+        this run only. Runs whether or not the polling thread is started;
+        ``on_done`` fires on completion.
         """
         since = datetime.now(timezone.utc) - timedelta(days=max(1, days_back))
         self._catch_up_stop.clear()
 
+        if job_ceiling:
+            scope = f"only jobs {job_floor or 1}-{job_ceiling}"
+        elif job_floor:
+            scope = f"skipping jobs below {job_floor}"
+        else:
+            scope = "all jobs"
+
         def work() -> None:
-            """Thread body: one locked poll with the supplied floor."""
+            """Thread body: one locked poll with the supplied job filter."""
             try:
                 self._emit(level="INFO", action="catch_up",
                            message=f"Catch-up scan: mail from the last "
-                                   f"{days_back} day(s), skipping jobs below "
-                                   f"{job_floor or 'none'}.")
+                                   f"{days_back} day(s), {scope}.")
                 with self._scan_lock:
                     self._poll(since=since, unread_only=False,
-                               job_floor=job_floor, cancel=self._catch_up_stop)
+                               job_floor=job_floor, job_ceiling=job_ceiling,
+                               cancel=self._catch_up_stop)
                 self._emit(level="INFO", action="catch_up",
                            message="Catch-up scan finished.")
             except Exception as exc:
@@ -184,12 +193,14 @@ class Watcher:
                                f"folder(s), trimmed {trimmed} old log row(s).")
 
     def _poll(self, since, unread_only: bool, back_check: bool = False,
-              job_floor: int = 0, cancel: threading.Event | None = None) -> None:
+              job_floor: int = 0, job_ceiling: int = 0,
+              cancel: threading.Event | None = None) -> None:
         """One scan -> parse -> route cycle across every enabled mailbox.
 
-        ``job_floor`` is forwarded to the router (0 = off; only a catch-up
-        sweep sets it). ``cancel`` is the flag to abort on - the shared
-        ``_stop`` for a routine poll, the catch-up's own flag for a sweep.
+        ``job_floor``/``job_ceiling`` are forwarded to the router (0 = off;
+        only a catch-up sweep sets them). ``cancel`` is the flag to abort on -
+        the shared ``_stop`` for a routine poll, the sweep's own flag for a
+        catch-up.
         """
         cancel = cancel or self._stop
         # Prefilter on the mailbox side so attachments no customer wants are
@@ -238,7 +249,8 @@ class Watcher:
                                    f"ref={parsed.invoice_ref or '-'} "
                                    f"conf={parsed.confidence:.2f} src={parsed.source}")
                 result = self._router.route(parsed, msg.attachments, msg.subject,
-                                            msg.sender, job_floor=job_floor)
+                                            msg.sender, job_floor=job_floor,
+                                            job_ceiling=job_ceiling)
             except Exception as exc:
                 log.exception("Message processing failed")
                 self._db.add_error(stage="parse", filename=msg.subject,

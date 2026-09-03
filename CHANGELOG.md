@@ -3,6 +3,15 @@
 All notable changes to InvoiceM8. Newest first. Bump `version.py` and add an
 entry here for every release.
 
+## 1.0.39
+- The "Catch up…" job filter now takes a **range**, not just a floor. The
+  field accepts a bare number (skip anything below it, as before), `low-high`
+  for an inclusive range, or `-high` for a ceiling only - so a catch-up run
+  can be aimed at a single job or a small block of jobs (handy for testing),
+  not only "this number and up". An invoice outside the range, or one whose
+  job number can't be read, is skipped. The range is still not saved; it
+  guards that one run. Routine polling is unchanged.
+
 ## 1.0.38
 - The app icon is now blue, and it is finally used *everywhere*. Dialogs were
   showing CustomTkinter's own blue logo, not ours: `apply_icon()` was only
