@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title InvoiceM8 - release
+title InvoiceM8 - build ^& release
 
 echo.
 echo   ##### #   # #   #  ###  ##### #### ##### #   #  ###
@@ -9,13 +9,14 @@ echo     #   ##  # #   # #   #   #   #    #    ## ## #   #
 echo     #   # # # #   # #   #   #   #    ###  # # #  ###
 echo     #   #  ## #   # #   #   #   #    #    #   # #   #
 echo   ##### #   #   #    ###  ##### #### ##### #   #  ###
-echo   release script   github.com/Mikeyau-ai/Invoicem8
+echo   build ^& release   github.com/Mikeyau-ai/Invoicem8
 echo.
 
-:: Thin wrapper: release.py is the one system - tests, PyInstaller build, then
-:: (after a Y/N confirmation) publishes GitHub release v<APP_VERSION> with the
-:: CHANGELOG notes. Pass --skip-build to publish the exe already in dist\,
-:: or --yes to skip the confirmation.
+:: release.py is the whole pipeline: it runs the tests, then asks
+::   1. build a fresh InvoiceM8.exe?
+::   2. publish it as GitHub release v<APP_VERSION>?
+:: Answer the prompts. Scripting overrides: --yes (yes to both),
+:: --build-only (build, never publish), --skip-build (publish dist\ as-is).
 python release.py %*
 set RC=%errorlevel%
 pause

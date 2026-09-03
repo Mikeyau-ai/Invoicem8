@@ -20,31 +20,32 @@ python main.py
 
 Python 3.11+ recommended. Windows only (uses pywin32 COM + `winreg`).
 
-## Build a standalone .exe
+## Build and release
 
 ```bash
-build.bat
-```
-
-Runs PyInstaller against `InvoiceM8.spec` and produces a single windowed
-`dist\InvoiceM8.exe` (~100 MB, no Python needed on the target machine).
-Build from an environment with the full `requirements.txt` installed so the AI
-/ Graph / attachment libraries get bundled - the spec silently skips any that
-are missing. Settings and the database still live in `%LOCALAPPDATA%\InvoiceM8`,
-so the exe stays stateless and can be replaced in place to update.
-
-## Releasing updates
-
-```bash
-:: bump version.py, commit, then:
+:: bump version.py + add a CHANGELOG.md entry, commit, then:
 release.bat
 ```
 
-Builds the exe and publishes it as a GitHub release tagged `v<version>`.
-Installed builds check `releases/latest` on launch (and via **Settings >
-Updates > Check for updates now**), download the new `InvoiceM8.exe`, and swap
-it in via a detached helper. Auto-check can be turned off in Settings; running
-from source never prompts.
+`release.bat` runs the whole pipeline through `release.py`: it runs the test
+suite, then asks two questions -
+
+1. **Build a fresh InvoiceM8.exe?** PyInstaller against `InvoiceM8.spec`,
+   producing a single windowed `dist\InvoiceM8.exe` (~100 MB, no Python needed
+   on the target). Build from an environment with the full `requirements.txt`
+   installed so the AI / Graph / attachment libraries get bundled - the spec
+   silently skips any that are missing.
+2. **Publish it as a GitHub release `v<version>`?** Answer no and you just have
+   a local build. Answer yes and it uploads the exe and the CHANGELOG notes.
+
+Scripting overrides: `--yes` (yes to both), `--build-only` (build, never
+publish), `--skip-build` (publish the exe already in `dist\`).
+
+Settings and the database live in `%LOCALAPPDATA%\InvoiceM8`, so the exe stays
+stateless and can be replaced in place. Installed builds check `releases/latest`
+on launch (and via **Settings > Updates > Check for updates now**), download the
+new `InvoiceM8.exe`, and swap it in via a detached helper. Auto-check can be
+turned off in Settings; running from source never prompts.
 
 Permanent download link:
 `https://github.com/Mikeyau-ai/Invoicem8/releases/latest/download/InvoiceM8.exe`

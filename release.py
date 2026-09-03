@@ -1,19 +1,21 @@
-"""Build dist/InvoiceM8.exe and (optionally) publish it as a GitHub release.
+"""Build dist/InvoiceM8.exe and, if you say yes, publish it as a GitHub release.
 
-One system, three ways in - ``build.bat`` and ``release.bat`` are just thin
-wrappers around this:
+One script, driven by two questions. ``release.bat`` is a thin wrapper:
 
-    python release.py                # test -> build -> publish release v<APP_VERSION>
-    python release.py --build-only    # test -> build, then stop (no gh CLI needed)
-    python release.py --skip-build    # test -> publish an exe that is already built
-    python release.py --yes           # skip the "Publish? [y/N]" confirmation
+    python release.py     # run tests, then ask:  build a fresh exe?  publish it?
+
+Non-interactive overrides (for scripting):
+
+    --yes           answer yes to both questions
+    --build-only    build, never publish (the old build.bat)
+    --skip-build    don't rebuild; publish the exe already in dist/
 
 The permanent download URL - also what installed builds poll for updates - is:
 
     https://github.com/<owner>/<repo>/releases/latest/download/InvoiceM8.exe
 
-Bump version.py, run release.bat, done. Publishing requires the GitHub CLI:
-    winget install GitHub.cli  &&  gh auth login
+Bump version.py, run release.bat, answer the prompts. Publishing needs the
+GitHub CLI:  winget install GitHub.cli  &&  gh auth login
 """
 from __future__ import annotations
 
@@ -98,12 +100,22 @@ def run_tests() -> bool:
     return True
 
 
-def main() -> int:
-    """Test, build, then publish - subject to the CLI flags. Returns an exit code.
+def _ask(question: str, *, default: bool) -> bool:
+    """Y/N prompt. Blank input - or a closed stdin - takes ``default``."""
+    try:
+        reply = input(f"{question} {'[Y/n]' if default else '[y/N]'} ").strip().lower()
+    except EOFError:
+        return default
+    return default if not reply else reply in ("y", "yes")
 
-    ``--build-only`` stops after a successful build; ``--skip-build`` publishes
-    the exe already in ``dist/``. Tests always run first either way. The publish
-    step prints what is about to ship and waits for a Y unless ``--yes`` is set.
+
+def main() -> int:
+    """Test, then interactively build and/or publish. Returns a shell exit code.
+
+    Run with no arguments and answer two prompts: build a fresh exe?, then
+    publish it as GitHub release ``v<APP_VERSION>``? Overrides for scripting:
+    ``--yes`` (yes to both), ``--build-only`` (build, never publish),
+    ``--skip-build`` (publish the exe already in ``dist/``).
     """
     args = set(sys.argv[1:])
     unknown = args - {"--build-only", "--skip-build", "--yes"}
@@ -120,12 +132,26 @@ def main() -> int:
         print("  TESTS FAILED - stopping.")
         return 1
 
-    if not skip_build and not build():
+    # --- question 1: build a fresh exe? -----------------------------
+    if skip_build:
+        do_build = False
+    elif assume_yes or build_only:
+        do_build = True
+    else:
+        do_build = _ask("\n  Build a fresh InvoiceM8.exe?", default=True)
+
+    if do_build and not build():
         return 1
     if not EXE.exists():
-        print(f"  {EXE} not found"
-              + (" - drop --skip-build to build it." if skip_build else "."))
+        print(f"  {EXE} not found - build one first.")
         return 1
+    stat = EXE.stat()
+    exe_desc = (f"{stat.st_size / 1_048_576:.1f} MB, built "
+                f"{datetime.fromtimestamp(stat.st_mtime):%Y-%m-%d %H:%M}")
+    if not do_build:
+        print(f"  Using the existing {EXE}  ({exe_desc})")
+
+    # --- question 2: publish it as a GitHub release? ---------------
     if build_only:
         print(f"\n  Done. {EXE} is ready to run.\n"
               f"  (settings + database live in %LOCALAPPDATA%\\InvoiceM8)\n")
@@ -149,16 +175,14 @@ def main() -> int:
     exists = gh("release", "view", tag).returncode == 0
 
     # Publishing is outward-facing and marks this build "Latest" - every
-    # installed client updates to it. Confirm what is about to ship first.
-    stat = EXE.stat()
-    print(f"\n  {'UPDATE' if exists else 'PUBLISH'} release {tag} on {slug} "
-          f"(GitHub marks it 'Latest').")
-    print(f"    asset : {EXE}  ({stat.st_size / 1_048_576:.1f} MB, built "
-          f"{datetime.fromtimestamp(stat.st_mtime):%Y-%m-%d %H:%M})")
-    print(f"    notes : first line - {changelog(APP_VERSION).splitlines()[0][:70]}")
-    if not assume_yes and input("  Proceed? [y/N] ").strip().lower() not in ("y", "yes"):
-        print("  Aborted - nothing published.")
-        return 1
+    # installed client updates to it. Show what will ship, then confirm.
+    print(f"\n  {'Update' if exists else 'Publish'} GitHub release {tag} on {slug}"
+          f"  (marked 'Latest' - every install auto-updates to it)")
+    print(f"    asset : {EXE}  ({exe_desc})")
+    print(f"    notes : {changelog(APP_VERSION).splitlines()[0][:72]}")
+    if not assume_yes and not _ask("  Publish now?", default=False):
+        print(f"\n  Not published. The build is in {EXE} if you want it.\n")
+        return 0
 
     notes = (
         f"## What's new\n\n{changelog(APP_VERSION)}\n\n"
